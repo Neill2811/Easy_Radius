@@ -6,6 +6,8 @@ The page is meant to stay plain: log in, edit routers, edit users, apply, test a
 
 The original logo is in [docs/easy-radius-logo.jpg](docs/easy-radius-logo.jpg). The site uses a matching inline SVG, not the JPEG.
 
+A page-by-page walkthrough with screenshots is in [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
+
 ## New server
 
 Copy this directory onto the Ubuntu 24.04 server, then:
