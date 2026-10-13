@@ -60,6 +60,11 @@ def _empty_state() -> dict:
         "localhost_secret": "",
         "routers": [],
         "users": [],
+        "audit": [],
+        "radius_server_address": "",
+        "totp_secret": "",
+        "totp_pending_secret": "",
+        "totp_enabled": False,
         "last_apply": None,
         "last_test": None,
     }
@@ -86,6 +91,15 @@ def load_state(data_dir: Path) -> dict:
         state.update(raw)
     state["routers"] = list(state.get("routers") or [])
     state["users"] = list(state.get("users") or [])
+    state["audit"] = list(state.get("audit") or [])
+    state["radius_server_address"] = state.get("radius_server_address") or ""
+    state["totp_secret"] = state.get("totp_secret") or ""
+    state["totp_pending_secret"] = state.get("totp_pending_secret") or ""
+    state["totp_enabled"] = bool(state.get("totp_enabled"))
+    for item in state["routers"]:
+        item["enabled"] = bool(item.get("enabled", True))
+    for item in state["users"]:
+        item["enabled"] = bool(item.get("enabled", True))
     return state
 
 

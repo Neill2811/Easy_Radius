@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Backup · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Backup</h1>
+</div>
+<div class="card">
+  <h2>Download</h2>
+  <p class="help">One file with routers, users, the localhost secret, authenticator setup, and the admin password hash. It is encrypted with the passphrase. Easy Radius does not store the passphrase.</p>
+  <form method="post" action="{{ url_for('backup_download') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="export-pass">Passphrase</label>
+    <input id="export-pass" name="passphrase" type="password" minlength="8" required autocomplete="new-password">
+    <button type="submit">Download backup</button>
+  </form>
+  <h2 class="section">Restore</h2>
+  <p class="help">This replaces the current routers, users, localhost secret, authenticator setup, and admin password.</p>
+  <form method="post" action="{{ url_for('backup_restore') }}" enctype="multipart/form-data" data-confirm="Replace the current Easy Radius data with this backup?">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="backup-file">Backup file</label>
+    <input id="backup-file" name="backup" type="file" required>
+    <label for="restore-pass">Passphrase</label>
+    <input id="restore-pass" name="passphrase" type="password" minlength="8" required autocomplete="current-password">
+    <button type="submit">Restore</button>
+  </form>
+</div>
+{% endblock %}

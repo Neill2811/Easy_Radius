@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Security · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Security</h1>
+</div>
+<div class="card">
+  {% if enabled %}
+  <p>Authenticator codes are on. You need a code as well as the password to sign in.</p>
+  <form method="post" action="{{ url_for('security_disable') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="code">Current code</label>
+    <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" required>
+    <button class="secondary" type="submit">Turn off authenticator codes</button>
+  </form>
+  {% elif pending %}
+  <p>Add this secret to your authenticator app, then enter a code to turn it on.</p>
+  <p><code>{{ pending }}</code></p>
+  <p class="help">{{ otpauth }}</p>
+  <form method="post" action="{{ url_for('security_confirm') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="code">Code from the app</label>
+    <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" required>
+    <button type="submit">Turn on</button>
+  </form>
+  {% else %}
+  <p>Authenticator codes are off. You can turn them on if you want a second step at login.</p>
+  <form method="post" action="{{ url_for('security_start') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Set up authenticator</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

@@ -62,6 +62,7 @@ If `/etc/freeradius/3.0/clients.conf` is already there, the script:
 - copies the current FreeRADIUS config to `/root/freeradius-backup-TIMESTAMP`
 - does **not** overwrite `clients.conf` or the users file
 - does **not** import routers or users into the web UI
+- does add the login and accounting log modules, then restarts FreeRADIUS only if `freeradius -XC` passes
 
 The UI starts empty. Add every router and user yourself, then click **Apply**. Apply writes new files (including a localhost client for `radtest`), runs `freeradius -XC`, and restarts FreeRADIUS only when the check passes. If the check fails, the previous files are put back.
 
@@ -69,10 +70,22 @@ Package upgrades during install keep the existing config files (`--force-confold
 
 ## What the pages do
 
-- **Routers.** Site name, IP, and secret. Secrets are hidden until you click Show. A new router gets a generated secret, which you can edit before saving.
-- **Users.** Username, password, and group `full`, `write`, or `read`. The group is written as `Mikrotik-Group`.
-- **Apply.** Backs up the current files under `/opt/radius-admin/data/backups/<timestamp>/`, writes the generated files, fixes `freerad` group read permission, runs `freeradius -XC`, then `systemctl restart freeradius` only on success.
-- **Test login.** Runs `radtest` against `127.0.0.1` with the localhost client secret.
+- **Routers.** Site name, IP, secret, and a green or red status from the last RADIUS packet (green if one arrived in the last 15 minutes). Secrets stay hidden until you click Show. Disable a router instead of deleting it. **Copy MikroTik config** shows, only after you click, the two RouterOS commands with that router's secret filled in. Set "This server's address" first; that address is what the router should use.
+- **Users.** Username, password, and group `full`, `write`, or `read`. The group is written as `Mikrotik-Group`. Disable a user instead of deleting them. Disabled routers and users are left out of the files Apply writes.
+- **Logins.** Recent Access-Accept and Access-Reject lines, filtered by router, user, and result.
+- **Sessions.** Who is logged in now, and recent accounting (start, update, stop).
+- **Apply.** Backs up the current files under `/opt/radius-admin/data/backups/<timestamp>/`, writes the generated files, fixes `freerad` group read permission, runs `freeradius -XC`, then `systemctl restart freeradius` only on success. A successful Apply also keeps a snapshot.
+- **Test.** Runs `radtest` against `127.0.0.1` with the localhost client secret.
+- **History.** Who changed what, and when. **Roll back** on a snapshot puts those routers and users back and applies them.
+- **Backup.** Download or restore one passphrase-encrypted file. The passphrase is not stored. A restore replaces routers, users, the localhost secret, authenticator setup, and the admin password. Click Apply afterwards.
+- **Security.** Optional authenticator codes for the `neill` login. Leave this off if you do not want it.
+
+`install.sh` enables a FreeRADIUS `linelog` for logins and accounting and hooks it into the site's `post-auth`, reject, and `accounting` sections. It does not replace `clients.conf` or the users file when those already exist. Logs are:
+
+- `/var/log/freeradius/easy-radius-auth.log`
+- `/var/log/freeradius/easy-radius-acct.log`
+
+The container mounts `/var/log/freeradius` read-only so the pages can read them. If `freeradius -XC` fails after that logging change, the installer stops and tells you which backup to restore.
 
 Generated users look like this:
 
@@ -117,7 +130,14 @@ sudo apt-get remove freeradius freeradius-utils
 
 ## Layout
 
-The app is deployed to `/opt/radius-admin`. `docker-compose.yml` runs the container with `privileged: true`, `pid: host`, and `network_mode: host`, and mounts `/etc/freeradius` plus `./data`. Host commands (`freeradius`, `systemctl`, `radtest`) are run with `nsenter -t 1 -m -u -i -n -p`.
+The app is deployed to `/opt/radius-admin`. `docker-compose.yml` runs the container with `privileged: true`, `pid: host`, and `network_mode: host`, and mounts `/etc/freeradius`, `/var/log/freeradius`, and `./data`. Host commands (`freeradius`, `systemctl`, `radtest`) are run with `nsenter -t 1 -m -u -i -n -p`.
+
+MikroTik commands, for a server at `192.0.2.1` and a sample secret, look like this:
+
+```text
+/radius add address=192.0.2.1 secret=example-router-secret service=login
+/user aaa set use-radius=yes
+```
 
 ## Tests
 

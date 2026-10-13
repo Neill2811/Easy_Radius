@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}History · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>History</h1>
+</div>
+<div class="card">
+  <h2>Changes</h2>
+  {% if events %}
+  <table>
+    <thead>
+      <tr><th>When</th><th>Who</th><th>Change</th></tr>
+    </thead>
+    <tbody>
+      {% for event in events %}
+      <tr>
+        <td data-label="When">{{ event.at }}</td>
+        <td data-label="Who">{{ event.actor }}</td>
+        <td data-label="Change">{{ event.detail }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No changes yet.</p>
+  {% endif %}
+  <h2 class="section">Apply snapshots</h2>
+  <p class="help">Roll back replaces the current routers and users with that snapshot and applies it to FreeRADIUS.</p>
+  {% if snapshots %}
+  <table>
+    <thead>
+      <tr><th>When</th><th>Routers</th><th>Users</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for snap in snapshots %}
+      <tr>
+        <td data-label="When">{{ snap.created_at }}</td>
+        <td data-label="Routers">{{ snap.routers }}</td>
+        <td data-label="Users">{{ snap.users }}</td>
+        <td data-label="Actions">
+          <form method="post" action="{{ url_for('history_rollback', snap_id=snap.id) }}" data-confirm="Roll back to {{ snap.created_at }}?">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="secondary small" type="submit">Roll back</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">Apply once to keep a snapshot you can roll back to.</p>
+  {% endif %}
+</div>
+{% endblock %}

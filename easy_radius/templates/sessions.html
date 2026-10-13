@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Sessions · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Sessions</h1>
+</div>
+<div class="card">
+  <h2>Logged in now</h2>
+  {% if online %}
+  <table>
+    <thead>
+      <tr><th>User</th><th>Router</th><th>Started</th><th>Last update</th></tr>
+    </thead>
+    <tbody>
+      {% for row in online %}
+      <tr>
+        <td data-label="User">{{ row.user }}</td>
+        <td data-label="Router">{{ row.router }}</td>
+        <td data-label="Started">{{ row.when }}</td>
+        <td data-label="Last update">{{ row.last_seen }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">{% if has_log %}Nobody is logged in.{% else %}No accounting log yet. install.sh enables it at {{ log_path }}.{% endif %}</p>
+  {% endif %}
+  <h2 class="section">Recent accounting</h2>
+  {% if history %}
+  <table>
+    <thead>
+      <tr><th>When</th><th>Status</th><th>User</th><th>Router</th><th>Session</th></tr>
+    </thead>
+    <tbody>
+      {% for row in history %}
+      <tr>
+        <td data-label="When">{{ row.when }}</td>
+        <td data-label="Status">{{ row.status }}</td>
+        <td data-label="User">{{ row.user }}</td>
+        <td data-label="Router">{{ row.router }}</td>
+        <td data-label="Session">{{ row.session }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No accounting lines yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

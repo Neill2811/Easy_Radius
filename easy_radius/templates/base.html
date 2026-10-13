@@ -16,8 +16,13 @@
     <nav class="nav">
       <a href="{{ url_for('routers') }}">Routers</a>
       <a href="{{ url_for('users') }}">Users</a>
+      <a href="{{ url_for('logins') }}">Logins</a>
+      <a href="{{ url_for('sessions') }}">Sessions</a>
       <a href="{{ url_for('apply_page') }}">Apply</a>
-      <a href="{{ url_for('test_page') }}">Test login</a>
+      <a href="{{ url_for('test_page') }}">Test</a>
+      <a href="{{ url_for('history') }}">History</a>
+      <a href="{{ url_for('backup_page') }}">Backup</a>
+      <a href="{{ url_for('security') }}">Security</a>
       <form class="logout-form" method="post" action="{{ url_for('logout') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="secondary small" type="submit">Log out</button>

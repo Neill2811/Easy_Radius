@@ -155,6 +155,40 @@ ensure_mikrotik_dictionary() {
   log "Installed a MikroTik-Group dictionary include."
 }
 
+configure_easy_radius_logging() {
+  LOGGING_STATUS=""
+  LOGGING_STATUS="$(python3 -m easy_radius.freeradius_site --freeradius-dir "$FREERADIUS_DIR")"
+  if [[ "$LOGGING_STATUS" == "changed" ]]; then
+    log "Configured FreeRADIUS login and accounting logs."
+  elif [[ "$LOGGING_STATUS" == "no-site" ]]; then
+    log "No FreeRADIUS site file yet. Login and accounting logs were not attached."
+  else
+    log "FreeRADIUS login and accounting logs are already configured."
+  fi
+}
+
+restart_if_logging_changed() {
+  if [[ "$LOGGING_STATUS" != "changed" || "$SKIP_PACKAGES" == "1" ]]; then
+    return 0
+  fi
+  mkdir -p /var/log/freeradius
+  if getent group freerad >/dev/null 2>&1; then
+    chown freerad:freerad /var/log/freeradius || true
+    chmod 750 /var/log/freeradius || true
+  fi
+  if ! command -v freeradius >/dev/null 2>&1 || ! command -v systemctl >/dev/null 2>&1; then
+    return 0
+  fi
+  if freeradius -XC; then
+    systemctl restart freeradius
+    log "Restarted FreeRADIUS so the new logs are active."
+  else
+    echo "freeradius -XC failed after enabling Easy Radius logs." >&2
+    echo "Restore the backup under $BACKUP_ROOT and run the installer again." >&2
+    exit 1
+  fi
+}
+
 ensure_files_module() {
   local enabled="$FREERADIUS_DIR/mods-enabled/files"
   local available="$FREERADIUS_DIR/mods-available/files"
@@ -286,6 +320,7 @@ export PYTHONPATH="$APP_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
 ensure_mikrotik_dictionary
 ensure_files_module
+configure_easy_radius_logging
 
 USERS_FILE="$FREERADIUS_DIR/mods-config/files/authorize"
 if [[ -L "$USERS_FILE" ]]; then
@@ -308,6 +343,8 @@ else
     systemctl restart freeradius
   fi
 fi
+
+restart_if_logging_changed
 
 if [[ "$SKIP_DOCKER" != "1" ]]; then
   docker compose -f "$APP_DIR/docker-compose.yml" up -d --build

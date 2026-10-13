@@ -19,6 +19,10 @@
       <input id="username" name="username" autocomplete="username" required autofocus>
       <label for="password">Password</label>
       <input id="password" name="password" type="password" autocomplete="current-password" required>
+      {% if need_code %}
+      <label for="code">Authenticator code</label>
+      <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" required>
+      {% endif %}
       <button type="submit">Log in</button>
     </form>
   </div>

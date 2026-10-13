@@ -6,10 +6,18 @@
   <a class="button" href="{{ url_for('router_new') }}">Add router</a>
 </div>
 <div class="card">
+  <form method="post" action="{{ url_for('server_address') }}" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="radius_server_address">This server's address</label>
+    <input id="radius_server_address" name="radius_server_address" value="{{ server_address }}" placeholder="192.0.2.1">
+    <button class="secondary" type="submit">Save</button>
+  </form>
+  <p class="help">Used only for the MikroTik commands. Green means a RADIUS packet was seen in the last 15 minutes.</p>
   {% if routers %}
   <table>
     <thead>
       <tr>
+        <th>Status</th>
         <th>Site</th>
         <th>IP</th>
         <th>Secret</th>
@@ -18,8 +26,12 @@
     </thead>
     <tbody>
       {% for router in routers %}
-      <tr>
-        <td data-label="Site">{{ router.site_name }}</td>
+      <tr class="{{ '' if router.enabled else 'is-disabled' }}">
+        <td data-label="Status">
+          <span class="status {{ 'up' if router.up else 'down' }}">{{ 'Up' if router.up else 'Down' }}</span>
+          <span class="help">{{ router.seen }}</span>
+        </td>
+        <td data-label="Site">{{ router.site_name }}{% if not router.enabled %} <span class="tag">disabled</span>{% endif %}</td>
         <td data-label="IP">{{ router.ip }}</td>
         <td data-label="Secret">
           <div class="secret-cell">
@@ -31,13 +43,24 @@
         <td data-label="Actions">
           <div class="actions">
             <a class="button secondary small" href="{{ url_for('router_edit', router_id=router.id) }}">Edit</a>
-            <form method="post" action="{{ url_for('router_delete', router_id=router.id) }}" data-confirm="Delete {{ router.site_name }}?">
+            <form method="post" action="{{ url_for('router_enabled', router_id=router.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="danger small" type="submit">Delete</button>
+              <input type="hidden" name="enabled" value="{{ '0' if router.enabled else '1' }}">
+              <button class="secondary small" type="submit">{{ 'Disable' if router.enabled else 'Enable' }}</button>
             </form>
+            {% if router.mikrotik %}
+            <button class="secondary small" type="button" data-reveal-block="mt-{{ router.id }}">Copy MikroTik config</button>
+            {% endif %}
           </div>
         </td>
       </tr>
+      {% if router.mikrotik %}
+      <tr id="mt-{{ router.id }}" hidden>
+        <td colspan="5">
+          <pre class="output mikrotik">{{ router.mikrotik }}</pre>
+        </td>
+      </tr>
+      {% endif %}
       {% endfor %}
     </tbody>
   </table>

@@ -80,7 +80,7 @@ a:hover { color: var(--orange-dark); }
 .logout-form { margin: 0; }
 
 .wrap {
-  max-width: 980px;
+  max-width: 1100px;
   margin: 0 auto;
   padding: 1.5rem 1rem 3rem;
 }
@@ -202,6 +202,41 @@ input, select {
 .login-card button { width: 100%; margin-top: 1rem; }
 
 .empty { color: var(--muted); margin: 0.5rem 0 0; }
+
+.inline-form, .filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+  margin-bottom: 0.5rem;
+}
+.inline-form label, .filters label { margin: 0 0 0.3rem; }
+.inline-form input, .filters input, .filters select { max-width: 220px; }
+.status { font-weight: 700; }
+.status.up { color: var(--ok); }
+.status.down { color: var(--danger); }
+.status.up::before, .status.down::before {
+  content: "";
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  margin-right: 0.35rem;
+  background: currentColor;
+}
+tr.is-disabled td { color: var(--muted); }
+.tag {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: #eceff3;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+h2.section { margin-top: 1.5rem; }
+pre.mikrotik { margin: 0.4rem 0; }
 
 @media (max-width: 720px) {
   table, thead, tbody, th, td, tr { display: block; }

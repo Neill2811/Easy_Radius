@@ -86,6 +86,8 @@ def render_clients_conf(localhost_secret: str, routers: list[dict], when: dateti
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", client_name) or client_name in taken:
             client_name = sanitise_client_name(router["site_name"], router["ip"], taken)
         taken.add(client_name)
+        if router.get("enabled", True) is False:
+            continue
         ip = ipaddress.ip_address(router["ip"])
         ip_key = "ipv6addr" if isinstance(ip, ipaddress.IPv6Address) else "ipaddr"
         lines.extend(
@@ -112,6 +114,8 @@ def render_users_file(users: list[dict], when: datetime | None = None) -> str:
         "",
     ]
     for user in users:
+        if user.get("enabled", True) is False:
+            continue
         group = user["group"]
         if group not in GROUPS:
             raise ConfigError(f"Unsupported group: {group}")

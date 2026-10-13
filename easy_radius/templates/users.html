@@ -18,8 +18,8 @@
     </thead>
     <tbody>
       {% for user in users %}
-      <tr>
-        <td data-label="Username">{{ user.username }}</td>
+      <tr class="{{ '' if user.enabled else 'is-disabled' }}">
+        <td data-label="Username">{{ user.username }}{% if not user.enabled %} <span class="tag">disabled</span>{% endif %}</td>
         <td data-label="Password">
           <div class="secret-cell">
             <code class="mask">••••••••</code>
@@ -31,9 +31,10 @@
         <td data-label="Actions">
           <div class="actions">
             <a class="button secondary small" href="{{ url_for('user_edit', user_id=user.id) }}">Edit</a>
-            <form method="post" action="{{ url_for('user_delete', user_id=user.id) }}" data-confirm="Delete {{ user.username }}?">
+            <form method="post" action="{{ url_for('user_enabled', user_id=user.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="danger small" type="submit">Delete</button>
+              <input type="hidden" name="enabled" value="{{ '0' if user.enabled else '1' }}">
+              <button class="secondary small" type="submit">{{ 'Disable' if user.enabled else 'Enable' }}</button>
             </form>
           </div>
         </td>
