@@ -267,6 +267,7 @@ def _client(tmp_path):
     app.config["TESTING"] = True
     app.config["CLIENTS_CONF"] = tmp_path / "clients.conf"
     app.config["USERS_FILE"] = tmp_path / "authorize"
+    app.config["POLICY_FILE"] = tmp_path / "policy" / "easy_radius"
     app.config["AUTH_LOG"] = tmp_path / "auth.log"
     app.config["ACCT_LOG"] = tmp_path / "acct.log"
     client = app.test_client()

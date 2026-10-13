@@ -175,6 +175,10 @@ restart_if_logging_changed() {
   if getent group freerad >/dev/null 2>&1; then
     chown freerad:freerad /var/log/freeradius || true
     chmod 750 /var/log/freeradius || true
+    if [[ -f "$FREERADIUS_DIR/policy.d/easy_radius" ]]; then
+      chown "root:$(getent group freerad | cut -d: -f3)" "$FREERADIUS_DIR/policy.d/easy_radius" || true
+      chmod 640 "$FREERADIUS_DIR/policy.d/easy_radius" || true
+    fi
   fi
   if ! command -v freeradius >/dev/null 2>&1 || ! command -v systemctl >/dev/null 2>&1; then
     return 0
@@ -336,7 +340,8 @@ else
     --data-dir "$APP_DIR/data" \
     --write-starter \
     --clients-conf "$FREERADIUS_DIR/clients.conf" \
-    --users-file "$USERS_FILE"
+    --users-file "$USERS_FILE" \
+    --policy-file "$FREERADIUS_DIR/policy.d/easy_radius"
   log "Wrote a starter clients.conf with a new localhost secret, and an empty users file."
   if [[ "$SKIP_PACKAGES" != "1" ]] && command -v systemctl >/dev/null 2>&1; then
     systemctl enable --now freeradius

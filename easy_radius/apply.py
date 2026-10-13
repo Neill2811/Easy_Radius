@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from easy_radius.access import render_access_policy
 from easy_radius.configgen import render_clients_conf, render_users_file
 from easy_radius.hostcmd import CommandResult
 
@@ -74,6 +75,7 @@ def apply_configuration(
     clients_path: Path,
     users_path: Path,
     backup_root: Path,
+    policy_path: Path | None = None,
 ) -> ApplyResult:
     clients_path = Path(clients_path)
     users_path = Path(users_path)
@@ -82,82 +84,58 @@ def apply_configuration(
     backup_dir = backup_root / stamp
     notes: list[str] = []
     commands: list[CommandResult] = []
+    when = datetime.now(timezone.utc)
+    managed = [
+        (clients_path, "clients.conf", render_clients_conf(state["localhost_secret"], state.get("routers") or [], when=when)),
+        (users_path, "users", render_users_file(state.get("users") or [], when=when)),
+    ]
+    if policy_path is not None:
+        managed.append(
+            (
+                Path(policy_path),
+                "easy_radius",
+                render_access_policy(state.get("users") or [], state.get("routers") or [], when=when),
+            )
+        )
 
-    clients_existed = _backup(clients_path, backup_dir / "clients.conf")
-    users_existed = _backup(users_path, backup_dir / "users")
+    existed: dict[str, bool] = {}
+    for path, name, _text in managed:
+        existed[name] = _backup(path, backup_dir / name)
     notes.append(f"Backed up current files to {backup_dir}")
 
-    when = datetime.now(timezone.utc)
-    clients_text = render_clients_conf(state["localhost_secret"], state.get("routers") or [], when=when)
-    users_text = render_users_file(state.get("users") or [], when=when)
-    _atomic_write(clients_path, clients_text)
-    _atomic_write(users_path, users_text)
-    notes.append(f"Wrote {clients_path}")
-    notes.append(f"Wrote {users_path}")
+    for path, _name, text in managed:
+        _atomic_write(path, text)
+        notes.append(f"Wrote {path}")
 
-    for path in (clients_path, users_path):
+    def fail(reason: str) -> ApplyResult:
+        return _rollback(notes, commands, managed, backup_dir, existed, reason)
+
+    for path, _name, _text in managed:
         result = _fix_permissions(runner, path)
         commands.append(result)
         if result.ok:
             notes.append(f"Set owner root:freerad and mode 640 on {path}")
         else:
             notes.append(result.format())
-        if not result.ok:
-            return _rollback(
-                notes,
-                commands,
-                clients_path,
-                users_path,
-                backup_dir,
-                clients_existed,
-                users_existed,
-                "Permissions were not applied. FreeRADIUS was not restarted.",
-            )
+            return fail("Permissions were not applied. FreeRADIUS was not restarted.")
 
     check = runner(["freeradius", "-XC"])
     commands.append(check)
     notes.append(check.format())
     if not check.ok:
-        return _rollback(
-            notes,
-            commands,
-            clients_path,
-            users_path,
-            backup_dir,
-            clients_existed,
-            users_existed,
-            "freeradius -XC failed. Restored the previous files. FreeRADIUS was not restarted.",
-        )
+        return fail("freeradius -XC failed. Restored the previous files. FreeRADIUS was not restarted.")
 
     restart = runner(["systemctl", "restart", "freeradius"])
     commands.append(restart)
     notes.append(restart.format())
     if not restart.ok:
-        return _rollback(
-            notes,
-            commands,
-            clients_path,
-            users_path,
-            backup_dir,
-            clients_existed,
-            users_existed,
-            "systemctl restart freeradius failed. Restored the previous files.",
-        )
+        return fail("systemctl restart freeradius failed. Restored the previous files.")
 
     active = runner(["systemctl", "is-active", "freeradius"])
     commands.append(active)
     notes.append(active.format())
     if not active.ok or active.stdout.strip() != "active":
-        return _rollback(
-            notes,
-            commands,
-            clients_path,
-            users_path,
-            backup_dir,
-            clients_existed,
-            users_existed,
-            "FreeRADIUS did not stay active. Restored the previous files.",
-        )
+        return fail("FreeRADIUS did not stay active. Restored the previous files.")
 
     notes.append("FreeRADIUS configuration check passed and the service was restarted.")
     return ApplyResult(
@@ -173,18 +151,16 @@ def apply_configuration(
 def _rollback(
     notes: list[str],
     commands: list[CommandResult],
-    clients_path: Path,
-    users_path: Path,
+    managed: list[tuple[Path, str, str]],
     backup_dir: Path,
-    clients_existed: bool,
-    users_existed: bool,
+    existed: dict[str, bool],
     reason: str,
 ) -> ApplyResult:
     notes.append(reason)
     try:
-        _restore(clients_path, backup_dir / "clients.conf", clients_existed)
-        _restore(users_path, backup_dir / "users", users_existed)
-        notes.append("Previous clients.conf and users file were restored.")
+        for path, name, _text in managed:
+            _restore(path, backup_dir / name, existed[name])
+        notes.append("Previous FreeRADIUS files were restored.")
     except OSError as exc:
         notes.append(f"Restore failed: {exc}")
     return ApplyResult(
@@ -197,5 +173,8 @@ def _rollback(
     )
 
 
-def run_radtest(username: str, password: str, secret: str, runner) -> CommandResult:
-    return runner(["radtest", username, password, "127.0.0.1", "0", secret])
+def run_radtest(username: str, password: str, secret: str, runner, nas_ip: str = "") -> CommandResult:
+    args = ["radtest", username, password, "127.0.0.1", "0", secret]
+    if nas_ip:
+        args.extend(["0", nas_ip])
+    return runner(args)

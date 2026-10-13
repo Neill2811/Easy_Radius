@@ -20,6 +20,7 @@ from flask import (
     session,
     url_for,
 )
+from easy_radius.access import access_label, parse_tags
 from easy_radius.apply import apply_configuration, run_radtest
 from easy_radius.audit import record
 from easy_radius.backup import BackupError, apply_payload, decrypt_backup, encrypt_backup, export_payload
@@ -63,6 +64,12 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
             os.environ.get(
                 "RADIUS_ADMIN_USERS_FILE",
                 "/etc/freeradius/3.0/mods-config/files/authorize",
+            )
+        ),
+        POLICY_FILE=Path(
+            os.environ.get(
+                "RADIUS_ADMIN_POLICY_FILE",
+                "/etc/freeradius/3.0/policy.d/easy_radius",
             )
         ),
         AUTH_LOG=Path(
@@ -191,7 +198,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
     def router_new():
         return render_template(
             "router_form.html",
-            router={"site_name": "", "ip": "", "secret": secrets.token_hex(16)},
+            router={"site_name": "", "ip": "", "secret": secrets.token_hex(16), "tags": []},
             error=None,
             title="Add router",
         )
@@ -202,11 +209,12 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         site_name = request.form.get("site_name", "")
         ip_text = request.form.get("ip", "")
         secret = request.form.get("secret", "")
-        error = validate_router(site_name, ip_text, secret, state["routers"])
+        tags, tag_error = parse_tags(request.form.get("tags", ""))
+        error = tag_error or validate_router(site_name, ip_text, secret, state["routers"])
         if error:
             return render_template(
                 "router_form.html",
-                router={"site_name": site_name.strip(), "ip": ip_text.strip(), "secret": secret},
+                router={"site_name": site_name.strip(), "ip": ip_text.strip(), "secret": secret, "tags": tags},
                 error=error,
                 title="Add router",
             ), 400
@@ -221,6 +229,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
                 "secret": secret,
                 "client_name": sanitise_client_name(site, ip, taken),
                 "enabled": True,
+                "tags": tags,
             }
         )
         record(state, "router.add", f"Added {site} ({ip})")
@@ -245,7 +254,8 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         site_name = request.form.get("site_name", "")
         ip_text = request.form.get("ip", "")
         secret = request.form.get("secret", "")
-        error = validate_router(site_name, ip_text, secret, state["routers"], current_id=router_id)
+        tags, tag_error = parse_tags(request.form.get("tags", ""))
+        error = tag_error or validate_router(site_name, ip_text, secret, state["routers"], current_id=router_id)
         if error:
             posted = {
                 "id": router_id,
@@ -253,6 +263,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
                 "ip": ip_text.strip(),
                 "secret": secret,
                 "enabled": router.get("enabled", True),
+                "tags": tags,
             }
             return render_template("router_form.html", router=posted, error=error, title="Edit router"), 400
         taken = {item["client_name"] for item in state["routers"] if item["id"] != router_id}
@@ -260,6 +271,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         router["site_name"] = site_name.strip()
         router["ip"] = ip
         router["secret"] = secret
+        router["tags"] = tags
         router["client_name"] = sanitise_client_name(router["site_name"], ip, taken)
         record(state, "router.edit", f"Updated {router['site_name']} ({ip})")
         save_state(app.config["DATA_DIR"], state)
@@ -283,14 +295,22 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
     @app.get("/users")
     def users():
         state = load_state(app.config["DATA_DIR"])
-        return render_template("users.html", users=state["users"])
+        shown = []
+        for user in state["users"]:
+            row = dict(user)
+            row["access_label"] = access_label(user, state["routers"])
+            shown.append(row)
+        return render_template("users.html", users=shown)
 
     @app.get("/users/new")
     def user_new():
+        state = load_state(app.config["DATA_DIR"])
         return render_template(
             "user_form.html",
-            user={"username": "", "password": "", "group": "write"},
+            user={"username": "", "password": "", "group": "write", "access": "all", "router_ids": [], "access_tags": []},
             groups=GROUPS,
+            routers=state["routers"],
+            tags=_known_tags(state),
             error=None,
             title="Add user",
         )
@@ -301,12 +321,23 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         username = request.form.get("username", "")
         password = request.form.get("password", "")
         group = request.form.get("group", "")
-        error = validate_user(username, password, group, state["users"])
+        access, router_ids, access_tags, access_error = _read_access(request, state)
+        error = access_error or validate_user(username, password, group, state["users"])
+        posted = {
+            "username": username.strip(),
+            "password": password,
+            "group": group,
+            "access": access,
+            "router_ids": router_ids,
+            "access_tags": access_tags,
+        }
         if error:
             return render_template(
                 "user_form.html",
-                user={"username": username.strip(), "password": password, "group": group},
+                user=posted,
                 groups=GROUPS,
+                routers=state["routers"],
+                tags=_known_tags(state),
                 error=error,
                 title="Add user",
             ), 400
@@ -318,9 +349,12 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
                 "password": password,
                 "group": group,
                 "enabled": True,
+                "access": access,
+                "router_ids": router_ids,
+                "access_tags": access_tags,
             }
         )
-        record(state, "user.add", f"Added {name} ({group})")
+        record(state, "user.add", f"Added {name} ({group}, {access_label(state['users'][-1], state['routers'])})")
         save_state(app.config["DATA_DIR"], state)
         flash("User saved. Click Apply before FreeRADIUS uses it.", "ok")
         return redirect(url_for("users"))
@@ -331,7 +365,15 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         user = _find(state["users"], user_id)
         if user is None:
             abort(404)
-        return render_template("user_form.html", user=user, groups=GROUPS, error=None, title="Edit user")
+        return render_template(
+            "user_form.html",
+            user=user,
+            groups=GROUPS,
+            routers=state["routers"],
+            tags=_known_tags(state),
+            error=None,
+            title="Edit user",
+        )
 
     @app.post("/users/<user_id>/edit")
     def user_update(user_id: str):
@@ -342,7 +384,8 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         username = request.form.get("username", "")
         password = request.form.get("password", "")
         group = request.form.get("group", "")
-        error = validate_user(username, password, group, state["users"], current_id=user_id)
+        access, router_ids, access_tags, access_error = _read_access(request, state)
+        error = access_error or validate_user(username, password, group, state["users"], current_id=user_id)
         if error:
             posted = {
                 "id": user_id,
@@ -350,14 +393,26 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
                 "password": password,
                 "group": group,
                 "enabled": user.get("enabled", True),
+                "access": access,
+                "router_ids": router_ids,
+                "access_tags": access_tags,
             }
             return render_template(
-                "user_form.html", user=posted, groups=GROUPS, error=error, title="Edit user"
+                "user_form.html",
+                user=posted,
+                groups=GROUPS,
+                routers=state["routers"],
+                tags=_known_tags(state),
+                error=error,
+                title="Edit user",
             ), 400
         user["username"] = username.strip()
         user["password"] = password
         user["group"] = group
-        record(state, "user.edit", f"Updated {user['username']} ({group})")
+        user["access"] = access
+        user["router_ids"] = router_ids
+        user["access_tags"] = access_tags
+        record(state, "user.edit", f"Updated {user['username']} ({group}, {access_label(user, state['routers'])})")
         save_state(app.config["DATA_DIR"], state)
         flash("User updated. Click Apply before FreeRADIUS uses it.", "ok")
         return redirect(url_for("users"))
@@ -438,6 +493,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
             app.config["CLIENTS_CONF"],
             app.config["USERS_FILE"],
             Path(data_dir) / "backups",
+            app.config["POLICY_FILE"],
         )
         state = load_state(data_dir)
         state["last_apply"] = {
@@ -484,6 +540,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
             app.config["CLIENTS_CONF"],
             app.config["USERS_FILE"],
             Path(data_dir) / "backups",
+            app.config["POLICY_FILE"],
         )
         state = load_state(data_dir)
         state["last_apply"] = {
@@ -508,7 +565,14 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
     @app.get("/test")
     def test_page():
         state = load_state(app.config["DATA_DIR"])
-        return render_template("test.html", result=state.get("last_test"), username="", password="")
+        return render_template(
+            "test.html",
+            result=state.get("last_test"),
+            username="",
+            password="",
+            routers=[router for router in state["routers"] if router.get("enabled", True)],
+            nas_ip="",
+        )
 
     @app.post("/test")
     def test_post():
@@ -516,10 +580,14 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         state = load_state(data_dir)
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
+        nas_ip = request.form.get("nas_ip", "").strip()
         if not username or not password:
             flash("Enter the username and password to test.", "error")
             return redirect(url_for("test_page"))
-        completed = run_radtest(username, password, state["localhost_secret"], app.config["RUNNER"])
+        if nas_ip and not any(router["ip"] == nas_ip and router.get("enabled", True) for router in state["routers"]):
+            flash("Choose a router from the list.", "error")
+            return redirect(url_for("test_page"))
+        completed = run_radtest(username, password, state["localhost_secret"], app.config["RUNNER"], nas_ip=nas_ip)
         output = completed.format()
         secret = state["localhost_secret"]
         if secret:
@@ -631,6 +699,36 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         return redirect(url_for("security"))
 
     return app
+
+
+def _known_tags(state: dict) -> list[str]:
+    tags: list[str] = []
+    for router in state["routers"]:
+        for tag in router.get("tags") or []:
+            if tag not in tags:
+                tags.append(tag)
+    return tags
+
+
+def _read_access(req, state: dict) -> tuple[str, list[str], list[str], str | None]:
+    access = req.form.get("access", "all")
+    if access not in {"all", "routers"}:
+        return "all", [], [], "Choose all routers or a chosen list."
+    known = {router["id"] for router in state["routers"]}
+    router_ids = []
+    for router_id in req.form.getlist("router_ids"):
+        if router_id not in known:
+            return access, [], [], "Choose routers from the list."
+        if router_id not in router_ids:
+            router_ids.append(router_id)
+    known_tags = set(_known_tags(state))
+    access_tags = []
+    for tag in req.form.getlist("access_tags"):
+        if tag not in known_tags:
+            return access, router_ids, [], "Choose site groups from the list."
+        if tag not in access_tags:
+            access_tags.append(tag)
+    return access, router_ids, access_tags, None
 
 
 def _find(items: list[dict], item_id: str) -> dict | None:

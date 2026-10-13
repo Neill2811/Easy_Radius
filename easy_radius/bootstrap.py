@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from easy_radius.access import render_access_policy
 from easy_radius.configgen import render_clients_conf, render_users_file
 from easy_radius.store import prepare_state
 
@@ -22,10 +23,11 @@ def _chown_freerad(path: Path) -> None:
     subprocess.run(["sh", "-c", script, "sh", str(path)], check=False)
 
 
-def write_starter(data_dir: Path, clients_path: Path, users_path: Path) -> None:
+def write_starter(data_dir: Path, clients_path: Path, users_path: Path, policy_path: Path | None = None) -> None:
     state = prepare_state(data_dir, ensure_admin=False)
     clients_path = Path(clients_path)
     users_path = Path(users_path)
+    paths = [clients_path, users_path]
     clients_path.parent.mkdir(parents=True, exist_ok=True)
     users_path.parent.mkdir(parents=True, exist_ok=True)
     clients_path.write_text(
@@ -33,7 +35,12 @@ def write_starter(data_dir: Path, clients_path: Path, users_path: Path) -> None:
         encoding="utf-8",
     )
     users_path.write_text(render_users_file([]), encoding="utf-8")
-    for path in (clients_path, users_path):
+    if policy_path is not None:
+        policy_path = Path(policy_path)
+        policy_path.parent.mkdir(parents=True, exist_ok=True)
+        policy_path.write_text(render_access_policy([], []), encoding="utf-8")
+        paths.append(policy_path)
+    for path in paths:
         os.chmod(path, 0o640)
         _chown_freerad(path)
 
@@ -47,10 +54,12 @@ def main(argv: list[str] | None = None) -> int:
         "--users-file",
         default="/etc/freeradius/3.0/mods-config/files/authorize",
     )
+    parser.add_argument("--policy-file", default="")
     args = parser.parse_args(argv)
     data_dir = Path(args.data_dir)
     if args.write_starter:
-        write_starter(data_dir, Path(args.clients_conf), Path(args.users_file))
+        policy = Path(args.policy_file) if args.policy_file else None
+        write_starter(data_dir, Path(args.clients_conf), Path(args.users_file), policy)
     else:
         prepare_state(data_dir, ensure_admin=False)
     return 0

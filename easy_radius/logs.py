@@ -20,8 +20,15 @@ def tail_text(path: Path, max_bytes: int = 512_000) -> str:
     path = Path(path)
     if not path.is_file():
         return ""
-    size = path.stat().st_size
-    with path.open("rb") as handle:
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return ""
+    try:
+        handle = path.open("rb")
+    except OSError:
+        return ""
+    with handle:
         if size > max_bytes:
             handle.seek(size - max_bytes)
             handle.readline()

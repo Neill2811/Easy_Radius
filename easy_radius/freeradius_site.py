@@ -13,6 +13,8 @@ import re
 import sys
 from pathlib import Path
 
+from easy_radius.access import render_access_policy
+
 MODULE_CONF = """# Easy Radius login and accounting logs.
 # Installed by install.sh. Safe to leave in place.
 
@@ -35,6 +37,7 @@ linelog easy_radius_acct {
 }
 """
 
+_AUTHORIZE = re.compile(r"^(?P<indent>[ \t]*)authorize[ \t]*\{", re.M)
 _ACCOUNTING = re.compile(r"^(?P<indent>[ \t]*)accounting[ \t]*\{", re.M)
 _POST_AUTH = re.compile(r"^(?P<indent>[ \t]*)post-auth[ \t]*\{", re.M)
 _REJECT = re.compile(r"^(?P<indent>[ \t]*)Post-Auth-Type[ \t]+REJECT[ \t]*\{", re.M)
@@ -74,8 +77,14 @@ def _insert(text: str, pattern: re.Pattern[str], marker: str, lines: list[str]) 
 
 
 def patch_site(text: str) -> tuple[str, bool]:
-    updated, changed_acct = _insert(
+    updated, changed_access = _insert(
         text,
+        _AUTHORIZE,
+        "EASY-RADIUS-ACCESS",
+        ["# EASY-RADIUS-ACCESS", "easy_radius_access"],
+    )
+    updated, changed_acct = _insert(
+        updated,
         _ACCOUNTING,
         "EASY-RADIUS-ACCT",
         ["# EASY-RADIUS-ACCT", "easy_radius_acct"],
@@ -95,7 +104,7 @@ def patch_site(text: str) -> tuple[str, bool]:
         "EASY-RADIUS-AUTH-REJECT",
         ["# EASY-RADIUS-AUTH-REJECT", "easy_radius_auth_reject"],
     )
-    return updated, changed_acct or changed_accept or changed_reject
+    return updated, changed_access or changed_acct or changed_accept or changed_reject
 
 
 def _ensure_detail(text: str) -> str:
@@ -134,6 +143,11 @@ def configure(freeradius_dir: Path) -> str:
         if link.exists():
             link.unlink()
         link.symlink_to("../mods-available/easy_radius")
+        changed = True
+    policy = freeradius_dir / "policy.d" / "easy_radius"
+    if not policy.exists():
+        policy.parent.mkdir(parents=True, exist_ok=True)
+        _write(policy, render_access_policy([], []))
         changed = True
     sites = freeradius_dir / "sites-enabled"
     site_files = [path for path in sites.iterdir() if path.is_file()] if sites.is_dir() else []

@@ -16,6 +16,9 @@
     <label for="secret">Secret</label>
     <input id="secret" name="secret" value="{{ router.secret }}" required autocomplete="off">
     <p class="help">A secret is filled in for a new router. You can change it before saving.</p>
+    <label for="tags">Tags</label>
+    <input id="tags" name="tags" value="{{ (router.tags or [])|join(', ') }}" placeholder="North, Core">
+    <p class="help">Optional site groups. A user can be allowed a whole tag.</p>
     <button type="submit">Save</button>
   </form>
 </div>

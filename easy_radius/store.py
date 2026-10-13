@@ -98,9 +98,26 @@ def load_state(data_dir: Path) -> dict:
     state["totp_enabled"] = bool(state.get("totp_enabled"))
     for item in state["routers"]:
         item["enabled"] = bool(item.get("enabled", True))
+        item["tags"] = _name_list(item.get("tags"))
     for item in state["users"]:
         item["enabled"] = bool(item.get("enabled", True))
+        item["access"] = "routers" if item.get("access") == "routers" else "all"
+        item["router_ids"] = [str(value) for value in (item.get("router_ids") or [])]
+        item["access_tags"] = _name_list(item.get("access_tags"))
     return state
+
+
+def _name_list(value) -> list[str]:
+    if isinstance(value, str):
+        value = value.split(",")
+    if not isinstance(value, list):
+        return []
+    names = []
+    for item in value:
+        text = str(item).strip()
+        if text and text not in names:
+            names.append(text)
+    return names
 
 
 def save_state(data_dir: Path, state: dict) -> None:

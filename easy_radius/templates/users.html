@@ -13,6 +13,7 @@
         <th>Username</th>
         <th>Password</th>
         <th>Group</th>
+        <th>Access</th>
         <th></th>
       </tr>
     </thead>
@@ -28,6 +29,7 @@
           </div>
         </td>
         <td data-label="Group">{{ user.group }}</td>
+        <td data-label="Access">{{ user.access_label }}</td>
         <td data-label="Actions">
           <div class="actions">
             <a class="button secondary small" href="{{ url_for('user_edit', user_id=user.id) }}">Edit</a>
