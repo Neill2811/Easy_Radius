@@ -98,7 +98,10 @@ def apply_configuration(
     for path in (clients_path, users_path):
         result = _fix_permissions(runner, path)
         commands.append(result)
-        notes.append(result.format())
+        if result.ok:
+            notes.append(f"Set owner root:freerad and mode 640 on {path}")
+        else:
+            notes.append(result.format())
         if not result.ok:
             return _rollback(
                 notes,

@@ -333,6 +333,8 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         secret = state["localhost_secret"]
         if secret:
             output = output.replace(secret, "<localhost-secret>")
+        if password:
+            output = output.replace(password, "<password>")
         state["last_test"] = {"ok": completed.ok, "output": output, "username": username}
         save_state(data_dir, state)
         return redirect(url_for("test_page"))
