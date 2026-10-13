@@ -1,0 +1,9 @@
+# Used only when the FreeRADIUS package does not already ship dictionary.mikrotik.
+# Attribute numbers are the public MikroTik vendor dictionary (vendor 14988).
+VENDOR          Mikrotik                        14988
+
+BEGIN-VENDOR    Mikrotik
+
+ATTRIBUTE       Mikrotik-Group                  3       string
+
+END-VENDOR      Mikrotik

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Apply · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Apply</h1>
+</div>
+<div class="card">
+  <p>This backs up <code>clients.conf</code> and the users file, writes the routers and users from this app, then runs <code>freeradius -XC</code>. FreeRADIUS restarts only when that check passes. If it fails, the backups are restored.</p>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Apply to FreeRADIUS</button>
+  </form>
+  {% if result %}
+  <h2 style="margin-top:1.25rem;">Last result</h2>
+  <p class="banner {{ 'ok' if result.ok else 'error' }}">
+    {% if result.ok %}
+      Check passed and FreeRADIUS was restarted.
+    {% else %}
+      Apply did not complete. Previous files were restored.
+    {% endif %}
+  </p>
+  <p class="help">Backup: {{ result.backup_dir }}</p>
+  <pre class="output">{{ result.output }}</pre>
+  {% endif %}
+</div>
+{% endblock %}

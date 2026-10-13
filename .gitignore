@@ -1,0 +1,19 @@
+# Runtime data holds password hashes, router secrets, and user passwords.
+data/
+backups/
+
+# Local environment and archives
+.env
+*.tgz
+*.tar.gz
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Editor
+.idea/
+.vscode/

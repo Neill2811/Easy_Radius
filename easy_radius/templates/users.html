@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Users · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Users</h1>
+  <a class="button" href="{{ url_for('user_new') }}">Add user</a>
+</div>
+<div class="card">
+  {% if users %}
+  <table>
+    <thead>
+      <tr>
+        <th>Username</th>
+        <th>Password</th>
+        <th>Group</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for user in users %}
+      <tr>
+        <td data-label="Username">{{ user.username }}</td>
+        <td data-label="Password">
+          <div class="secret-cell">
+            <code class="mask">••••••••</code>
+            <code class="shown" hidden>{{ user.password }}</code>
+            <button class="secondary small" type="button" data-reveal>Show</button>
+          </div>
+        </td>
+        <td data-label="Group">{{ user.group }}</td>
+        <td data-label="Actions">
+          <div class="actions">
+            <a class="button secondary small" href="{{ url_for('user_edit', user_id=user.id) }}">Edit</a>
+            <form method="post" action="{{ url_for('user_delete', user_id=user.id) }}" data-confirm="Delete {{ user.username }}?">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="danger small" type="submit">Delete</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No users yet. Add one, then click Apply.</p>
+  {% endif %}
+</div>
+{% endblock %}

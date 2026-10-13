@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Routers · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Routers</h1>
+  <a class="button" href="{{ url_for('router_new') }}">Add router</a>
+</div>
+<div class="card">
+  {% if routers %}
+  <table>
+    <thead>
+      <tr>
+        <th>Site</th>
+        <th>IP</th>
+        <th>Secret</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for router in routers %}
+      <tr>
+        <td data-label="Site">{{ router.site_name }}</td>
+        <td data-label="IP">{{ router.ip }}</td>
+        <td data-label="Secret">
+          <div class="secret-cell">
+            <code class="mask">••••••••</code>
+            <code class="shown" hidden>{{ router.secret }}</code>
+            <button class="secondary small" type="button" data-reveal>Show</button>
+          </div>
+        </td>
+        <td data-label="Actions">
+          <div class="actions">
+            <a class="button secondary small" href="{{ url_for('router_edit', router_id=router.id) }}">Edit</a>
+            <form method="post" action="{{ url_for('router_delete', router_id=router.id) }}" data-confirm="Delete {{ router.site_name }}?">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="danger small" type="submit">Delete</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No routers yet. Add a site, then click Apply.</p>
+  {% endif %}
+</div>
+{% endblock %}
