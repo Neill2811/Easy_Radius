@@ -39,8 +39,16 @@ from easy_radius.logs import (
 )
 from easy_radius.mikrotik import mikrotik_commands
 from easy_radius.snapshots import SnapshotError, list_snapshots, load_snapshot, save_snapshot
-from easy_radius.store import check_admin_password, load_state, prepare_state, save_state
+from easy_radius.store import (
+    check_admin_password,
+    initial_password_path,
+    load_state,
+    prepare_state,
+    save_state,
+    set_admin_password,
+)
 from easy_radius.totp import generate_secret, provisioning_uri, verify_totp
+from easy_radius.userhash import hash_user_password
 from easy_radius.validate import canonical_ip, validate_router, validate_user
 
 GROUPS = ("full", "write", "read")
@@ -97,6 +105,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
 
     @app.before_request
     def csrf_and_auth():
+        _sync_secret_key(app)
         if request.method == "POST":
             token = request.form.get("csrf_token", "")
             expected = session.get("csrf_token", "")
@@ -297,7 +306,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         state = load_state(app.config["DATA_DIR"])
         shown = []
         for user in state["users"]:
-            row = dict(user)
+            row = {key: value for key, value in user.items() if key != "password"}
             row["access_label"] = access_label(user, state["routers"])
             shown.append(row)
         return render_template("users.html", users=shown)
@@ -307,12 +316,14 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         state = load_state(app.config["DATA_DIR"])
         return render_template(
             "user_form.html",
-            user={"username": "", "password": "", "group": "write", "access": "all", "router_ids": [], "access_tags": []},
+            user={"username": "", "group": "write", "access": "all", "router_ids": [], "access_tags": []},
             groups=GROUPS,
             routers=state["routers"],
             tags=_known_tags(state),
             error=None,
             title="Add user",
+            password_label="Password",
+            require_password=True,
         )
 
     @app.post("/users/new")
@@ -325,7 +336,6 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         error = access_error or validate_user(username, password, group, state["users"])
         posted = {
             "username": username.strip(),
-            "password": password,
             "group": group,
             "access": access,
             "router_ids": router_ids,
@@ -340,13 +350,15 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
                 tags=_known_tags(state),
                 error=error,
                 title="Add user",
+                password_label="Password",
+                require_password=True,
             ), 400
         name = username.strip()
         state["users"].append(
             {
                 "id": secrets.token_hex(8),
                 "username": name,
-                "password": password,
+                "password": hash_user_password(password),
                 "group": group,
                 "enabled": True,
                 "access": access,
@@ -365,14 +377,17 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         user = _find(state["users"], user_id)
         if user is None:
             abort(404)
+        shown = {key: value for key, value in user.items() if key != "password"}
         return render_template(
             "user_form.html",
-            user=user,
+            user=shown,
             groups=GROUPS,
             routers=state["routers"],
             tags=_known_tags(state),
             error=None,
             title="Edit user",
+            password_label="Set new password",
+            require_password=False,
         )
 
     @app.post("/users/<user_id>/edit")
@@ -385,12 +400,18 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         password = request.form.get("password", "")
         group = request.form.get("group", "")
         access, router_ids, access_tags, access_error = _read_access(request, state)
-        error = access_error or validate_user(username, password, group, state["users"], current_id=user_id)
+        error = access_error or validate_user(
+            username,
+            password,
+            group,
+            state["users"],
+            current_id=user_id,
+            password_required=bool(password),
+        )
         if error:
             posted = {
                 "id": user_id,
                 "username": username.strip(),
-                "password": password,
                 "group": group,
                 "enabled": user.get("enabled", True),
                 "access": access,
@@ -405,9 +426,12 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
                 tags=_known_tags(state),
                 error=error,
                 title="Edit user",
+                password_label="Set new password",
+                require_password=False,
             ), 400
         user["username"] = username.strip()
-        user["password"] = password
+        if password:
+            user["password"] = hash_user_password(password)
         user["group"] = group
         user["access"] = access
         user["router_ids"] = router_ids
@@ -658,6 +682,36 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
             otpauth=provisioning_uri(pending) if pending else "",
         )
 
+    @app.post("/security/password")
+    def security_password():
+        data_dir = app.config["DATA_DIR"]
+        state = load_state(data_dir)
+        current = request.form.get("current_password", "")
+        new_password = request.form.get("new_password", "")
+        confirm = request.form.get("confirm_password", "")
+        if not check_admin_password(state, "neill", current):
+            flash("Current password is not correct.", "error")
+            return redirect(url_for("security"))
+        if len(new_password) < 12:
+            flash("New password must be at least 12 characters.", "error")
+            return redirect(url_for("security"))
+        if new_password != confirm:
+            flash("New passwords do not match.", "error")
+            return redirect(url_for("security"))
+        set_admin_password(state, new_password)
+        record(state, "security", "Changed the admin password")
+        save_state(data_dir, state)
+        initial = initial_password_path(data_dir)
+        if initial.exists():
+            initial.unlink()
+        app.secret_key = state["secret_key"]
+        session.clear()
+        session["admin"] = "neill"
+        session["csrf_token"] = secrets.token_urlsafe(32)
+        session.permanent = True
+        flash("Password changed. Other sessions have been signed out.", "ok")
+        return redirect(url_for("security"))
+
     @app.post("/security/start")
     def security_start():
         state = load_state(app.config["DATA_DIR"])
@@ -699,6 +753,17 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         return redirect(url_for("security"))
 
     return app
+
+
+def _sync_secret_key(app: Flask) -> None:
+    """Pick up a session key rotated by the password reset command."""
+    try:
+        state = load_state(app.config["DATA_DIR"])
+    except Exception:
+        return
+    key = state.get("secret_key") or ""
+    if key and key != app.secret_key:
+        app.secret_key = key
 
 
 def _known_tags(state: dict) -> list[str]:
@@ -774,6 +839,6 @@ def _decorate_routers(app: Flask, state: dict) -> list[dict]:
         status = health.get(router["id"], {})
         row["up"] = bool(status.get("up"))
         row["seen"] = format_age(status.get("age"))
-        row["mikrotik"] = mikrotik_commands(server, router["secret"]) if server else ""
+        row["mikrotik"] = mikrotik_commands(server, router["secret"], router["ip"]) if server else ""
         decorated.append(row)
     return decorated

@@ -11,6 +11,7 @@ from pathlib import Path
 from easy_radius.access import render_access_policy
 from easy_radius.configgen import render_clients_conf, render_users_file
 from easy_radius.hostcmd import CommandResult
+from easy_radius.perms import file_permission_args, freeradius_config_check_args, remember
 
 
 @dataclass
@@ -58,15 +59,8 @@ def _restore(path: Path, backup: Path, existed: bool) -> None:
     shutil.copy2(backup, target)
 
 
-def _fix_permissions(runner, path: Path) -> CommandResult:
-    script = (
-        'path="$1"; '
-        'gid="$(getent group freerad | cut -d: -f3 || true)"; '
-        'if [ -n "$gid" ]; then chown "root:$gid" "$path"; '
-        'else echo "freerad group not found" >&2; exit 1; fi; '
-        'chmod 640 "$path"'
-    )
-    return runner(["sh", "-c", script, "sh", str(_resolve_write_path(path))])
+def _fix_permissions(runner, path: Path, identity: tuple[int, int, int] | None) -> CommandResult:
+    return runner(file_permission_args(path, identity))
 
 
 def apply_configuration(
@@ -99,7 +93,9 @@ def apply_configuration(
         )
 
     existed: dict[str, bool] = {}
+    identities: dict[str, tuple[int, int, int] | None] = {}
     for path, name, _text in managed:
+        identities[name] = remember(path)
         existed[name] = _backup(path, backup_dir / name)
     notes.append(f"Backed up current files to {backup_dir}")
 
@@ -107,35 +103,51 @@ def apply_configuration(
         _atomic_write(path, text)
         notes.append(f"Wrote {path}")
 
-    def fail(reason: str) -> ApplyResult:
-        return _rollback(notes, commands, managed, backup_dir, existed, reason)
+    def fail(reason: str, restart_restored: bool = False) -> ApplyResult:
+        result = _rollback(notes, commands, managed, backup_dir, existed, identities, runner, reason)
+        if restart_restored:
+            again = runner(["systemctl", "restart", "freeradius"])
+            result.commands.append(again)
+            extra = again.format()
+            if again.ok:
+                extra += "\n\nRestarted FreeRADIUS with the restored files."
+            else:
+                extra += "\n\nRestart of the restored files failed."
+            result.output = result.output + "\n\n" + extra
+        return result
 
-    for path, _name, _text in managed:
-        result = _fix_permissions(runner, path)
+    for path, name, _text in managed:
+        result = _fix_permissions(runner, path, identities[name])
         commands.append(result)
         if result.ok:
-            notes.append(f"Set owner root:freerad and mode 640 on {path}")
+            if identities[name] is None:
+                notes.append(f"Set freerad:freerad mode 640 on {path}")
+            else:
+                notes.append(f"Restored the original owner and mode on {path}")
         else:
             notes.append(result.format())
             return fail("Permissions were not applied. FreeRADIUS was not restarted.")
 
-    check = runner(["freeradius", "-XC"])
+    check = runner(freeradius_config_check_args())
     commands.append(check)
     notes.append(check.format())
     if not check.ok:
-        return fail("freeradius -XC failed. Restored the previous files. FreeRADIUS was not restarted.")
+        return fail("freeradius -XC as freerad failed. Restored the previous files. FreeRADIUS was not restarted.")
 
     restart = runner(["systemctl", "restart", "freeradius"])
     commands.append(restart)
     notes.append(restart.format())
     if not restart.ok:
-        return fail("systemctl restart freeradius failed. Restored the previous files.")
+        journal = runner(["journalctl", "-u", "freeradius", "-n", "80", "--no-pager"])
+        commands.append(journal)
+        notes.append(journal.format())
+        return fail("systemctl restart freeradius failed. Restored the previous files.", restart_restored=True)
 
     active = runner(["systemctl", "is-active", "freeradius"])
     commands.append(active)
     notes.append(active.format())
     if not active.ok or active.stdout.strip() != "active":
-        return fail("FreeRADIUS did not stay active. Restored the previous files.")
+        return fail("FreeRADIUS did not stay active. Restored the previous files.", restart_restored=True)
 
     notes.append("FreeRADIUS configuration check passed and the service was restarted.")
     return ApplyResult(
@@ -154,12 +166,19 @@ def _rollback(
     managed: list[tuple[Path, str, str]],
     backup_dir: Path,
     existed: dict[str, bool],
+    identities: dict[str, tuple[int, int, int] | None],
+    runner,
     reason: str,
 ) -> ApplyResult:
     notes.append(reason)
     try:
         for path, name, _text in managed:
             _restore(path, backup_dir / name, existed[name])
+            if existed[name]:
+                fixed = _fix_permissions(runner, path, identities.get(name))
+                commands.append(fixed)
+                if not fixed.ok:
+                    notes.append(fixed.format())
         notes.append("Previous FreeRADIUS files were restored.")
     except OSError as exc:
         notes.append(f"Restore failed: {exc}")

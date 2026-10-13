@@ -49,7 +49,7 @@ This is the home page. Each row is one MikroTik (or other NAS) that is allowed t
 2. Use **Show** to reveal a shared secret. Click **Hide** when you are done.
 3. **Edit** changes the site, address, secret, or tags.
 4. **Disable** keeps the row but leaves that router out of the next Apply. **Enable** puts it back. Nothing reaches FreeRADIUS until you click **Apply**.
-5. **Copy MikroTik config** shows the two RouterOS lines for that row. See `06_mikrotik_config.png`.
+5. **Copy MikroTik config** shows the RouterOS lines for that row, including `src-address` set to that router's IP. See `06_mikrotik_config.png`.
 6. **Add router** is for a new site.
 
 ![Routers and health](screenshots/03_routers_health.png)
@@ -87,14 +87,15 @@ Same fields as add. Use it when a site is renamed, renumbered, or its secret is 
 
 **Copy MikroTik config**
 
-These two lines are what you paste on the router. They stay hidden until you click, because they contain the shared secret.
+These lines are what you paste on the router. They stay hidden until you click, because they contain the shared secret. `src-address` is the router IP stored in Easy Radius. That IP must be an address the router itself owns. Without `src-address`, a router behind NAT can send from a public address FreeRADIUS does not know, and the packet is ignored.
 
 1. On **Routers**, set **This server's address** and click **Save** if it is empty.
 2. On the router row, click **Copy MikroTik config**.
-3. The browser copies the text, and the two lines appear:
-   - `/radius add address=<this server> secret=<that router's secret> service=login`
+3. The browser copies the commands, and these lines appear:
+   - `/radius add address=<this server> secret=<that router's secret> service=login src-address=<router IP> timeout=3s`
+   - `/radius set [find address=<this server>] src-address=<router IP> secret=<that router's secret>`
    - `/user aaa set use-radius=yes`
-4. Paste them into the MikroTik terminal.
+4. Paste the first line on a router that does not yet have this server. Paste the second if `/radius` already lists it. Paste the third so logins use RADIUS.
 5. Click **Hide MikroTik config** when you are finished.
 
 ![MikroTik commands](screenshots/06_mikrotik_config.png)
@@ -103,10 +104,10 @@ These two lines are what you paste on the router. They stay hidden until you cli
 
 **Users**
 
-These are the people who log in through RADIUS. The group becomes `Mikrotik-Group` (`full`, `write`, or `read`). The Access column says **All routers**, or the routers and site groups that person is limited to.
+These are the people who log in through RADIUS. The group becomes `Mikrotik-Group` (`full`, `write`, or `read`). The Access column says **All routers**, or the routers and site groups that person is limited to. The password is stored only as a SHA-512 hash. The page cannot show it. On an upgrade, existing plaintext passwords are hashed at startup. Click **Apply** once so FreeRADIUS gets the hashed users file. Login stays PAP, which is what MikroTik `service=login` and the Test page use.
 
 1. **Add user** creates someone new.
-2. **Edit** changes the name, password, group, or access.
+2. **Set new password** opens the edit page so you can replace the password. Leave that box blank to keep the current one. **Edit** changes the name, group, or access.
 3. **Disable** keeps the person in the list but removes them from FreeRADIUS on the next Apply. **Enable** puts them back.
 4. Click **Apply** after any of those changes.
 
@@ -117,7 +118,7 @@ These are the people who log in through RADIUS. The group becomes `Mikrotik-Grou
 **Add user**
 
 1. Click **Add user**.
-2. Type a username and a password.
+2. Type a username and a password. The password is saved only as a hash. You cannot open this page later and read it back.
 3. Choose the group: `full`, `write`, or `read`.
 4. Leave **All routers** selected unless this person should be limited.
 5. Click **Save**, then **Apply**.
@@ -130,7 +131,7 @@ These are the people who log in through RADIUS. The group becomes `Mikrotik-Grou
 
 **All routers** is the default. **Chosen routers** rejects this person on every router you did not tick, and on every router that does not carry a ticked site group.
 
-1. Click **Edit** on the user.
+1. Click **Edit** on the user. The password box is empty. Type a new password only when you want to replace the old one.
 2. Choose **Chosen routers**.
 3. Tick the routers they may use.
 4. Tick a site group, such as `North`, to include every router with that tag.
@@ -177,7 +178,7 @@ If `freeradius -XC` fails, FreeRADIUS is not restarted and the previous files ar
 This runs `radtest` on the server, against localhost, using the localhost client secret. It checks that FreeRADIUS will accept a user. Apply first, or the test is still talking to the old config.
 
 1. Click **Test**.
-2. Type the username and password.
+2. Type the username and password. This is PAP, the same method MikroTik uses for `service=login`. FreeRADIUS checks it against the stored hash.
 3. For someone allowed on all routers, **This server only** is enough.
 4. For someone limited to chosen routers, pick one of those routers in the **Router** list. The test sets `NAS-IP-Address` to that router.
 5. Click **Run test**.
@@ -244,7 +245,7 @@ Rolling back replaces the current routers and users and runs Apply. The browser 
 
 **Backup download and restore**
 
-One file holds the routers, users, localhost secret, authenticator setup, and the admin password hash. It is encrypted with a passphrase you choose. Easy Radius does not store that passphrase. Lose the passphrase and the file cannot be opened.
+One file holds the routers, user password hashes, localhost secret, authenticator setup, and the admin password hash. It is encrypted with a passphrase you choose. Easy Radius does not store that passphrase. Lose the passphrase and the file cannot be opened. An older backup that still contains a plaintext user password is hashed when you restore it, before it is written to disk.
 
 Download:
 
@@ -301,3 +302,20 @@ Use this to turn the second step back off.
 4. The next login is username and password only.
 
 ![Authenticator codes on](screenshots/20_security_on.png)
+
+## Change the admin password
+
+Use this when you still know the current password. The new one must be at least 12 characters. It is stored only as a hash. Other browsers that were signed in are signed out. This browser stays signed in.
+
+1. Click **Security**.
+2. Type the current password.
+3. Type the new password twice.
+4. Click **Change password**.
+
+If you have forgotten the password, on the server run:
+
+```bash
+sudo docker exec -it radius-admin python -m easy_radius.reset_admin_password
+```
+
+It asks for the new password twice and does not print it.

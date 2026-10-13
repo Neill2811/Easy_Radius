@@ -24,6 +24,8 @@ That will:
 4. Enable the `files` module and make sure the `Mikrotik-Group` attribute is available.
 5. Start Easy Radius on port **8088**.
 
+The installer writes FreeRADIUS files as `freerad:freerad` mode `0640` (new directories `0750`). When it edits a file that already exists, it keeps that file's owner and mode. It then runs `sudo -u freerad freeradius -XC`, the same user the service uses, and only then restarts FreeRADIUS. If the restart fails, the installer prints the last journal lines and puts the previous config back.
+
 Read the admin password once:
 
 ```bash
@@ -31,6 +33,14 @@ sudo docker logs radius-admin
 ```
 
 The username is `neill`. A root-only copy is also written to `/opt/radius-admin/data/initial-admin-password.txt`. Delete that file after you have saved the password.
+
+Change it later on the Security page (current password, then the new one twice, at least 12 characters). If the password is lost:
+
+```bash
+sudo docker exec -it radius-admin python -m easy_radius.reset_admin_password
+```
+
+That stores only a hash and signs out existing browsers.
 
 Open `http://<server>:8088`, add routers and users, then click **Apply**.
 
@@ -72,31 +82,31 @@ Package upgrades during install keep the existing config files (`--force-confold
 
 ## What the pages do
 
-- **Routers.** Site name, IP, secret, and a green or red status from the last RADIUS packet (green if one arrived in the last 15 minutes). Secrets stay hidden until you click Show. Disable a router instead of deleting it. **Copy MikroTik config** shows, only after you click, the two RouterOS commands with that router's secret filled in. Set "This server's address" first; that address is what the router should use.
-- **Users.** Username, password, group `full` / `write` / `read` (`Mikrotik-Group`), and access. Access is **All routers** unless you choose routers or a site group. A site group is a tag on the router, such as `North`. Disable a user instead of deleting them. Disabled routers and users are left out of the files Apply writes. A restricted user is rejected on any other router. The check uses the packet source address and the client shortname, so a router cannot pretend to be another site. The Test page can still imitate a router from this server by setting NAS-IP-Address.
+- **Routers.** Site name, IP, secret, and a green or red status from the last RADIUS packet (green if one arrived in the last 15 minutes). Secrets stay hidden until you click Show. Disable a router instead of deleting it. **Copy MikroTik config** shows, only after you click, the RouterOS commands with that router's secret filled in. The commands set `src-address` to the router IP stored here, which must be an address the router itself owns. Without that, a router behind NAT can send from a public address FreeRADIUS does not know, and the packet is ignored. Set "This server's address" first; that address is what the router should use. The second command updates a RADIUS entry that is already on the router.
+- **Users.** Username, group `full` / `write` / `read` (`Mikrotik-Group`), and access. The password is stored only as a SHA-512 crypt hash (`$6$`) and cannot be shown again. **Set new password** replaces it. Access is **All routers** unless you choose routers or a site group. A site group is a tag on the router, such as `North`. Disable a user instead of deleting them. Disabled routers and users are left out of the files Apply writes. A restricted user is rejected on any other router. The check uses the packet source address and the client shortname, so a router cannot pretend to be another site. The Test page can still imitate a router from this server by setting NAS-IP-Address. Login uses PAP, which is what MikroTik `service=login` and `radtest` send. CHAP cannot be used, because the cleartext password is not kept.
 - **Logins.** Recent Access-Accept and Access-Reject lines, filtered by router, user, and result.
 - **Sessions.** Who is logged in now, and recent accounting (start, update, stop).
-- **Apply.** Backs up the current files under `/opt/radius-admin/data/backups/<timestamp>/`, writes the generated files, fixes `freerad` group read permission, runs `freeradius -XC`, then `systemctl restart freeradius` only on success. A successful Apply also keeps a snapshot.
+- **Apply.** Backs up the current files under `/opt/radius-admin/data/backups/<timestamp>/`, writes the generated files, restores each file's owner and mode (new files are `freerad:freerad` mode `0640`), runs `sudo -u freerad freeradius -XC`, then `systemctl restart freeradius` only on success. If the restart fails, Apply prints the journal and puts the previous files back. A successful Apply also keeps a snapshot. An existing install that still has plaintext user passwords hashes them on startup. The users file is rewritten with those hashes on the next Apply.
 - **Test.** Runs `radtest` against `127.0.0.1` with the localhost client secret.
 - **History.** Who changed what, and when. **Roll back** on a snapshot puts those routers and users back and applies them.
 - **Backup.** Download or restore one passphrase-encrypted file. The passphrase is not stored. A restore replaces routers, users, the localhost secret, authenticator setup, and the admin password. Click Apply afterwards.
-- **Security.** Optional authenticator codes for the `neill` login. Leave this off if you do not want it.
+- **Security.** Change the admin password, and optional authenticator codes for the `neill` login. Leave authenticator codes off if you do not want them. The admin password is stored only as a hash. Changing it signs out other browsers.
 
 `install.sh` enables a FreeRADIUS `linelog` for logins and accounting and hooks it into the site's `post-auth`, reject, and `accounting` sections. It does not replace `clients.conf` or the users file when those already exist. Logs are:
 
 - `/var/log/freeradius/easy-radius-auth.log`
 - `/var/log/freeradius/easy-radius-acct.log`
 
-The container mounts `/var/log/freeradius` read-only so the pages can read them. If `freeradius -XC` fails after that logging change, the installer stops and tells you which backup to restore.
+The container mounts `/var/log/freeradius` read-only so the pages can read them. The installer runs `sudo -u freerad freeradius -XC` after it writes files. If that check or the restart fails, it prints the last journal lines, restores the backup from `/root/freeradius-backup-TIMESTAMP`, and stops before Docker starts.
 
-Generated users look like this:
+Generated users look like this. The value is a SHA-512 crypt hash of `example-password`, not the password:
 
 ```text
-alice Cleartext-Password := "example-password"
+alice Crypt-Password := "$6$examplesalt1234$ZvOLEUdnZysdHXmagNW4UQjiz0Gd0YHrrNVCWgqrT4vRLQ9ctjcGMuoQTGZ6b7j1EbVNbmxRGFMZ5TfjLVNNt1"
     Mikrotik-Group = "write"
 ```
 
-Router secrets and user passwords are stored in `/opt/radius-admin/data/data.json` because FreeRADIUS needs the cleartext values. The admin password is stored only as a hash. The data directory is mode `0700`.
+FreeRADIUS checks that hash with the `pap` module. Router secrets stay in `/opt/radius-admin/data/data.json` because FreeRADIUS needs them. User passwords and the admin password are stored only as hashes, including in encrypted backups and History snapshots. The data directory is mode `0700`.
 
 ## Uninstall and rollback
 
@@ -134,10 +144,11 @@ sudo apt-get remove freeradius freeradius-utils
 
 The app is deployed to `/opt/radius-admin`. `docker-compose.yml` runs the container with `privileged: true`, `pid: host`, and `network_mode: host`, and mounts `/etc/freeradius`, `/var/log/freeradius`, and `./data`. Host commands (`freeradius`, `systemctl`, `radtest`) are run with `nsenter -t 1 -m -u -i -n -p`.
 
-MikroTik commands, for a server at `192.0.2.1` and a sample secret, look like this:
+MikroTik commands, for a server at `192.0.2.1`, a router at `192.0.2.10`, and a sample secret, look like this:
 
 ```text
-/radius add address=192.0.2.1 secret=example-router-secret service=login
+/radius add address=192.0.2.1 secret=example-router-secret service=login src-address=192.0.2.10 timeout=3s
+/radius set [find address=192.0.2.1] src-address=192.0.2.10 secret=example-router-secret
 /user aaa set use-radius=yes
 ```
 

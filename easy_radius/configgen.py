@@ -10,6 +10,8 @@ import ipaddress
 import re
 from datetime import datetime, timezone
 
+from easy_radius.userhash import hash_user_password, is_sha512_crypt
+
 GROUPS = ("full", "write", "read")
 _CLIENT_NAME = re.compile(r"[^A-Za-z0-9_]+")
 
@@ -122,9 +124,12 @@ def render_users_file(users: list[dict], when: datetime | None = None) -> str:
         username = user["username"]
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@+-]*", username):
             raise ConfigError(f"Unsupported username: {username}")
-        lines.append(
-            f"{username} Cleartext-Password := {_quote(user['password'])}"
-        )
+        stored = str(user.get("password") or "")
+        if not stored:
+            raise ConfigError(f"Missing password hash for {username}")
+        if not is_sha512_crypt(stored):
+            stored = hash_user_password(stored)
+        lines.append(f"{username} Crypt-Password := {_quote(stored)}")
         lines.append(f'    Mikrotik-Group = "{group}"')
         lines.append("")
     if not users:
@@ -204,7 +209,7 @@ def parse_users_file(text: str) -> list[dict]:
     lines = text.splitlines()
     index = 0
     user_re = re.compile(
-        r'^([A-Za-z0-9][A-Za-z0-9_.@+-]*)\s+Cleartext-Password\s+:=\s+"(.*)"\s*$'
+        r'^([A-Za-z0-9][A-Za-z0-9_.@+-]*)\s+(?:Cleartext-Password|Crypt-Password)\s+:=\s+"(.*)"\s*$'
     )
     group_re = re.compile(r'^\s+Mikrotik-Group\s+=\s+"(full|write|read)"\s*$')
     while index < len(lines):
@@ -229,3 +234,29 @@ def parse_users_file(text: str) -> list[dict]:
         )
         index += 2
     return users
+
+
+def rewrite_cleartext_passwords(text: str) -> str:
+    """Turn Cleartext-Password lines into Crypt-Password hashes.
+
+    Lines that are already Crypt-Password are left as they are.
+    """
+    user_re = re.compile(
+        r'^([A-Za-z0-9][A-Za-z0-9_.@+-]*)\s+Cleartext-Password\s+:=\s+"(.*)"\s*$'
+    )
+    changed = False
+    out: list[str] = []
+    for line in text.splitlines():
+        match = user_re.match(line)
+        if not match:
+            out.append(line)
+            continue
+        stored = hash_user_password(unescape_radius_string(match.group(2)))
+        out.append(f"{match.group(1)} Crypt-Password := {_quote(stored)}")
+        changed = True
+    if not changed:
+        return text
+    body = "\n".join(out)
+    if text.endswith("\n"):
+        body += "\n"
+    return body

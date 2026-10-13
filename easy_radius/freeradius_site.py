@@ -8,12 +8,12 @@ Running it again does not add a second copy.
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import sys
 from pathlib import Path
 
 from easy_radius.access import render_access_policy
+from easy_radius.perms import ensure_dir, write_text
 
 MODULE_CONF = """# Easy Radius login and accounting logs.
 # Installed by install.sh. Safe to leave in place.
@@ -119,12 +119,7 @@ def _ensure_detail(text: str) -> str:
 
 
 def _write(path: Path, text: str) -> None:
-    target = path.resolve() if path.is_symlink() else path
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.parent / f".{target.name}.easy-radius-tmp"
-    tmp.write_text(text, encoding="utf-8")
-    os.chmod(tmp, 0o640)
-    os.replace(tmp, target)
+    write_text(path, text)
 
 
 def configure(freeradius_dir: Path) -> str:
@@ -133,12 +128,12 @@ def configure(freeradius_dir: Path) -> str:
     available = freeradius_dir / "mods-available"
     enabled = freeradius_dir / "mods-enabled"
     module_path = available / "easy_radius"
-    available.mkdir(parents=True, exist_ok=True)
+    ensure_dir(available)
     if not module_path.exists() or module_path.read_text(encoding="utf-8") != MODULE_CONF:
         _write(module_path, MODULE_CONF)
         changed = True
     link = enabled / "easy_radius"
-    enabled.mkdir(parents=True, exist_ok=True)
+    ensure_dir(enabled)
     if not link.is_symlink():
         if link.exists():
             link.unlink()
@@ -146,7 +141,7 @@ def configure(freeradius_dir: Path) -> str:
         changed = True
     policy = freeradius_dir / "policy.d" / "easy_radius"
     if not policy.exists():
-        policy.parent.mkdir(parents=True, exist_ok=True)
+        ensure_dir(policy.parent)
         _write(policy, render_access_policy([], []))
         changed = True
     sites = freeradius_dir / "sites-enabled"

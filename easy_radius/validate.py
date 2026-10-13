@@ -42,12 +42,20 @@ def canonical_ip(ip_text: str) -> str:
     return ipaddress.ip_address(ip_text.strip()).compressed
 
 
-def validate_user(username: str, password: str, group: str, users: list[dict], current_id: str | None = None) -> str | None:
+def validate_user(
+    username: str,
+    password: str,
+    group: str,
+    users: list[dict],
+    current_id: str | None = None,
+    password_required: bool = True,
+) -> str | None:
     username = username.strip()
     if not _USERNAME.fullmatch(username):
         return "Username can use letters, numbers, and . _ @ + -"
-    if not valid_secret(password):
-        return "Password must be 1-128 printable ASCII characters"
+    if password_required or password:
+        if not valid_secret(password):
+            return "Password must be 1-128 printable ASCII characters"
     if group not in GROUPS:
         return "Choose full, write, or read"
     for user in users:

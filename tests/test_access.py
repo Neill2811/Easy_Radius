@@ -107,7 +107,7 @@ def test_apply_writes_policy_and_restores_it_when_the_check_fails(tmp_path):
 
         def __call__(self, args, timeout=120):
             self.calls.append(list(args))
-            if args[:2] == ["freeradius", "-XC"]:
+            if len(args) >= 2 and args[-2:] == ["freeradius", "-XC"]:
                 return CommandResult(list(args), 1, "", "parse error\n")
             if args and args[0] == "sh":
                 return CommandResult(list(args), 0, "", "")

@@ -1,3 +1,5 @@
+import stat
+
 from easy_radius.apply import apply_configuration
 from easy_radius.configgen import parse_clients_conf, parse_users_file
 from easy_radius.hostcmd import CommandResult
@@ -12,13 +14,15 @@ class FakeRunner:
 
     def __call__(self, args, timeout=120):
         self.calls.append(list(args))
-        if args[:2] == ["freeradius", "-XC"]:
+        if len(args) >= 2 and args[-2:] == ["freeradius", "-XC"]:
             if self.xc_code == 0:
                 return CommandResult(list(args), 0, "Configuration appears to be OK.\n", "")
             return CommandResult(list(args), self.xc_code, "", "line 1: parse error\n")
         if args[:3] == ["systemctl", "restart", "freeradius"]:
             err = "" if self.restart_code == 0 else "restart failed\n"
             return CommandResult(list(args), self.restart_code, "", err)
+        if args[:2] == ["journalctl", "-u"]:
+            return CommandResult(list(args), 0, "journal excerpt\n", "")
         if args[:3] == ["systemctl", "is-active", "freeradius"]:
             code = 0 if self.active == "active" else 3
             return CommandResult(list(args), code, self.active + "\n", "")
@@ -55,6 +59,7 @@ def test_apply_writes_config_and_restarts_when_check_passes(tmp_path):
     users = tmp_path / "authorize"
     clients.write_text("ORIGINAL CLIENTS\n", encoding="utf-8")
     users.write_text("ORIGINAL USERS\n", encoding="utf-8")
+    before_mode = format(stat.S_IMODE(clients.stat().st_mode), "o")
     runner = FakeRunner()
 
     result = apply_configuration(_state(), runner, clients, users, tmp_path / "backups")
@@ -67,16 +72,19 @@ def test_apply_writes_config_and_restarts_when_check_passes(tmp_path):
     assert parsed["routers"][0]["secret"] == "example-router-secret"
     assert parsed["routers"][0]["site_name"] == "ExampleSite"
     written_users = parse_users_file(users.read_text(encoding="utf-8"))
-    assert written_users == [
-        {"username": "alice", "password": "example-password", "group": "write"}
-    ]
+    assert written_users[0]["username"] == "alice"
+    assert written_users[0]["group"] == "write"
+    assert written_users[0]["password"].startswith("$6$")
+    assert "example-password" not in users.read_text(encoding="utf-8")
+    assert "Cleartext-Password" not in users.read_text(encoding="utf-8")
+    assert any(call[0] == "sh" and call[-1] == before_mode for call in runner.calls)
     backup = next((tmp_path / "backups").iterdir())
     assert (backup / "clients.conf").read_text(encoding="utf-8") == "ORIGINAL CLIENTS\n"
     assert (backup / "users").read_text(encoding="utf-8") == "ORIGINAL USERS\n"
     joined = [" ".join(call) for call in runner.calls]
-    assert any(call.startswith("freeradius -XC") for call in joined)
+    assert any(call == "sudo -u freerad freeradius -XC" for call in joined)
     assert any(call == "systemctl restart freeradius" for call in joined)
-    assert joined.index("freeradius -XC") < joined.index("systemctl restart freeradius")
+    assert joined.index("sudo -u freerad freeradius -XC") < joined.index("systemctl restart freeradius")
 
 
 def test_apply_restores_files_when_check_fails(tmp_path):
@@ -94,7 +102,7 @@ def test_apply_restores_files_when_check_fails(tmp_path):
     assert clients.read_text(encoding="utf-8") == "ORIGINAL CLIENTS keep-this-secret\n"
     assert users.read_text(encoding="utf-8") == "ORIGINAL USERS keep-this-user\n"
     assert not any(call[:3] == ["systemctl", "restart", "freeradius"] for call in runner.calls)
-    assert "freeradius -XC failed" in result.output
+    assert "freeradius -XC as freerad failed" in result.output
     assert "parse error" in result.output
 
 
@@ -110,3 +118,20 @@ def test_apply_restores_when_service_does_not_stay_active(tmp_path):
     assert result.rolled_back
     assert clients.read_text(encoding="utf-8") == "ORIGINAL\n"
     assert any(call[:3] == ["systemctl", "restart", "freeradius"] for call in runner.calls)
+
+
+def test_apply_prints_the_journal_when_restart_fails(tmp_path):
+    clients = tmp_path / "clients.conf"
+    users = tmp_path / "authorize"
+    clients.write_text("ORIGINAL\n", encoding="utf-8")
+    users.write_text("ORIGINAL\n", encoding="utf-8")
+    runner = FakeRunner(restart_code=1)
+
+    result = apply_configuration(_state(), runner, clients, users, tmp_path / "backups")
+
+    assert result.rolled_back
+    assert clients.read_text(encoding="utf-8") == "ORIGINAL\n"
+    assert any(call[:3] == ["journalctl", "-u", "freeradius"] for call in runner.calls)
+    assert "journal excerpt" in result.output
+    restarts = [call for call in runner.calls if call[:3] == ["systemctl", "restart", "freeradius"]]
+    assert len(restarts) == 2

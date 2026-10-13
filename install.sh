@@ -69,6 +69,7 @@ fi
 
 log() { printf '%s\n' "$*"; }
 
+LAST_BACKUP=""
 backup_freeradius() {
   if [[ ! -d "$FREERADIUS_DIR" ]]; then
     return 0
@@ -78,7 +79,41 @@ backup_freeradius() {
   dest="$BACKUP_ROOT/freeradius-backup-$stamp"
   mkdir -p "$dest"
   cp -a "$FREERADIUS_DIR" "$dest/freeradius"
+  LAST_BACKUP="$dest"
   log "Backed up $FREERADIUS_DIR to $dest"
+}
+
+print_freeradius_journal() {
+  echo "----- journalctl -u freeradius -----" >&2
+  journalctl -u freeradius -n 100 --no-pager >&2 || echo "journalctl could not read the freeradius log." >&2
+}
+
+restore_freeradius_backup() {
+  if [[ -z "${LAST_BACKUP}" || ! -d "${LAST_BACKUP}/freeradius" ]]; then
+    echo "No FreeRADIUS backup is available to restore." >&2
+    return 1
+  fi
+  echo "Restoring $FREERADIUS_DIR from $LAST_BACKUP" >&2
+  rm -rf "$FREERADIUS_DIR"
+  cp -a "$LAST_BACKUP/freeradius" "$FREERADIUS_DIR"
+}
+
+prepare_freeradius_logs() {
+  mkdir -p /var/log/freeradius
+  if ! id freerad >/dev/null 2>&1; then
+    echo "freerad user not found. FreeRADIUS cannot write its logs." >&2
+    return 1
+  fi
+  chown freerad:freerad /var/log/freeradius
+  chmod 750 /var/log/freeradius
+  local log_file
+  for log_file in /var/log/freeradius/easy-radius-auth.log /var/log/freeradius/easy-radius-acct.log; do
+    if [[ ! -e "$log_file" ]]; then
+      touch "$log_file"
+    fi
+    chown freerad:freerad "$log_file"
+    chmod 640 "$log_file"
+  done
 }
 
 install_packages() {
@@ -151,7 +186,12 @@ ensure_mikrotik_dictionary() {
   if ! grep -q "dictionary.easy-radius-mikrotik" "$etc_dict"; then
     printf '\n$INCLUDE %s\n' "$local_dict" >> "$etc_dict"
   fi
-  chmod 644 "$local_dict"
+  if id freerad >/dev/null 2>&1; then
+    chown freerad:freerad "$local_dict"
+    chmod 640 "$local_dict"
+  else
+    chmod 644 "$local_dict"
+  fi
   log "Installed a MikroTik-Group dictionary include."
 }
 
@@ -167,30 +207,40 @@ configure_easy_radius_logging() {
   fi
 }
 
-restart_if_logging_changed() {
-  if [[ "$LOGGING_STATUS" != "changed" || "$SKIP_PACKAGES" == "1" ]]; then
+activate_freeradius() {
+  if [[ "$SKIP_PACKAGES" == "1" ]]; then
     return 0
   fi
-  mkdir -p /var/log/freeradius
-  if getent group freerad >/dev/null 2>&1; then
-    chown freerad:freerad /var/log/freeradius || true
-    chmod 750 /var/log/freeradius || true
-    if [[ -f "$FREERADIUS_DIR/policy.d/easy_radius" ]]; then
-      chown "root:$(getent group freerad | cut -d: -f3)" "$FREERADIUS_DIR/policy.d/easy_radius" || true
-      chmod 640 "$FREERADIUS_DIR/policy.d/easy_radius" || true
-    fi
+  if [[ "$PREEXISTING" != "0" && "$LOGGING_STATUS" != "changed" ]]; then
+    return 0
   fi
   if ! command -v freeradius >/dev/null 2>&1 || ! command -v systemctl >/dev/null 2>&1; then
     return 0
   fi
-  if freeradius -XC; then
-    systemctl restart freeradius
-    log "Restarted FreeRADIUS so the new logs are active."
-  else
-    echo "freeradius -XC failed after enabling Easy Radius logs." >&2
-    echo "Restore the backup under $BACKUP_ROOT and run the installer again." >&2
+  prepare_freeradius_logs
+  echo "Checking the FreeRADIUS config as the freerad user."
+  if ! sudo -u freerad freeradius -XC; then
+    echo "freeradius -XC failed when run as freerad." >&2
+    print_freeradius_journal
+    restore_freeradius_backup || true
     exit 1
   fi
+  systemctl enable freeradius
+  set +e
+  systemctl restart freeradius
+  local restart_code=$?
+  set -e
+  if [[ "$restart_code" -ne 0 ]] || ! systemctl is-active --quiet freeradius; then
+    echo "systemctl restart freeradius failed." >&2
+    print_freeradius_journal
+    restore_freeradius_backup || true
+    set +e
+    systemctl restart freeradius
+    set -e
+    echo "The previous FreeRADIUS config was restored from $LAST_BACKUP." >&2
+    exit 1
+  fi
+  log "FreeRADIUS is running."
 }
 
 ensure_files_module() {
@@ -343,13 +393,9 @@ else
     --users-file "$USERS_FILE" \
     --policy-file "$FREERADIUS_DIR/policy.d/easy_radius"
   log "Wrote a starter clients.conf with a new localhost secret, and an empty users file."
-  if [[ "$SKIP_PACKAGES" != "1" ]] && command -v systemctl >/dev/null 2>&1; then
-    systemctl enable --now freeradius
-    systemctl restart freeradius
-  fi
 fi
 
-restart_if_logging_changed
+activate_freeradius
 
 if [[ "$SKIP_DOCKER" != "1" ]]; then
   docker compose -f "$APP_DIR/docker-compose.yml" up -d --build

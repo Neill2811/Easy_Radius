@@ -64,18 +64,25 @@ def test_disabled_entries_are_omitted_from_generated_files():
     assert "example-router-secret" not in clients
     assert "example-north-secret" in clients
     assert "alice" not in written_users
-    assert 'bob Cleartext-Password := "example-password"' in written_users
+    assert "bob" in written_users
+    assert "Crypt-Password" in written_users
+    assert "example-password" not in written_users
     assert 'Mikrotik-Group = "read"' in written_users
 
 
-def test_mikrotik_commands_use_the_server_address_and_secret():
-    text = mikrotik_commands("192.0.2.1", "example-router-secret")
+def test_mikrotik_commands_set_src_address_to_the_router_ip():
+    text = mikrotik_commands("192.0.2.1", "example-router-secret", "192.0.2.10")
     assert text == (
-        "/radius add address=192.0.2.1 secret=example-router-secret service=login\n"
+        "/radius add address=192.0.2.1 secret=example-router-secret service=login "
+        "src-address=192.0.2.10 timeout=3s\n"
+        "/radius set [find address=192.0.2.1] src-address=192.0.2.10 secret=example-router-secret\n"
         "/user aaa set use-radius=yes\n"
     )
-    quoted = mikrotik_commands("192.0.2.1", 'has space "quote"')
+    quoted = mikrotik_commands("192.0.2.1", 'has space "quote"', "192.0.2.10")
     assert 'secret="has space \\"quote\\""' in quoted
+    v6 = mikrotik_commands("2001:db8::1", "example-router-secret", "2001:db8::10")
+    assert 'address="2001:db8::1"' in v6
+    assert 'src-address="2001:db8::10"' in v6
 
 
 def test_auth_log_filters_and_ignores_junk():
@@ -251,7 +258,7 @@ def _client(tmp_path):
 
         def __call__(self, args, timeout=120):
             self.calls.append(list(args))
-            if args[:2] == ["freeradius", "-XC"]:
+            if len(args) >= 2 and args[-2:] == ["freeradius", "-XC"]:
                 return CommandResult(list(args), 0, "Configuration appears to be OK.\n", "")
             if args[:3] == ["systemctl", "is-active", "freeradius"]:
                 return CommandResult(list(args), 0, "active\n", "")

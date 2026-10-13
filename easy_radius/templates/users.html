@@ -6,6 +6,7 @@
   <a class="button" href="{{ url_for('user_new') }}">Add user</a>
 </div>
 <div class="card">
+  <p class="help">Passwords are stored only as a hash and cannot be shown. Use <strong>Set new password</strong> to replace one, then click Apply.</p>
   {% if users %}
   <table>
     <thead>
@@ -22,11 +23,7 @@
       <tr class="{{ '' if user.enabled else 'is-disabled' }}">
         <td data-label="Username">{{ user.username }}{% if not user.enabled %} <span class="tag">disabled</span>{% endif %}</td>
         <td data-label="Password">
-          <div class="secret-cell">
-            <code class="mask">••••••••</code>
-            <code class="shown" hidden>{{ user.password }}</code>
-            <button class="secondary small" type="button" data-reveal>Show</button>
-          </div>
+          <a class="button secondary small" href="{{ url_for('user_edit', user_id=user.id) }}#password">Set new password</a>
         </td>
         <td data-label="Group">{{ user.group }}</td>
         <td data-label="Access">{{ user.access_label }}</td>
