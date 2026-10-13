@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ title }}</h1>
+  <a href="{{ url_for('routers') }}">Back to routers</a>
+</div>
+<div class="card">
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="site_name">Site name</label>
+    <input id="site_name" name="site_name" value="{{ router.site_name }}" required>
+    <label for="ip">IP address</label>
+    <input id="ip" name="ip" value="{{ router.ip }}" required placeholder="192.0.2.10">
+    <label for="secret">Secret</label>
+    <input id="secret" name="secret" value="{{ router.secret }}" required autocomplete="off">
+    <p class="help">A secret is filled in for a new router. You can change it before saving.</p>
+    <label for="tags">Tags</label>
+    <input id="tags" name="tags" value="{{ (router.tags or [])|join(', ') }}" placeholder="North, Core">
+    <p class="help">Optional site groups. A user can be allowed a whole tag.</p>
+    <button type="submit">Save</button>
+  </form>
+</div>
+{% endblock %}

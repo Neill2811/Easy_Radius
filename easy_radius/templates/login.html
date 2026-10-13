@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in · Easy Radius</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="login-page">
+  <div class="card login-card">
+    {% include "partials/icon.html" %}
+    <h1 class="wordmark"><span class="easy">Easy</span> <span class="radius">Rad<span class="idot">ı</span>us</span></h1>
+    <p class="help">Sign in to manage routers and users.</p>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <form method="post" action="{{ url_for('login_post') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label for="username">Username</label>
+      <input id="username" name="username" autocomplete="username" required autofocus>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      {% if need_code %}
+      <label for="code">Authenticator code</label>
+      <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" required>
+      {% endif %}
+      <button type="submit">Log in</button>
+    </form>
+  </div>
+</body>
+</html>

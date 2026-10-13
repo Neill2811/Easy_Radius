@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Easy Radius{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('routers') }}">
+      {% include "partials/icon.html" %}
+      <span><span class="easy">Easy</span> <span class="radius">Rad<span class="idot">ı</span>us</span></span>
+    </a>
+    <nav class="nav">
+      <a href="{{ url_for('routers') }}">Routers</a>
+      <a href="{{ url_for('users') }}">Users</a>
+      <a href="{{ url_for('logins') }}">Logins</a>
+      <a href="{{ url_for('sessions') }}">Sessions</a>
+      <a href="{{ url_for('apply_page') }}">Apply</a>
+      <a href="{{ url_for('test_page') }}">Test</a>
+      <a href="{{ url_for('history') }}">History</a>
+      <a href="{{ url_for('backup_page') }}">Backup</a>
+      <a href="{{ url_for('security') }}">Security</a>
+      <form class="logout-form" method="post" action="{{ url_for('logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="secondary small" type="submit">Log out</button>
+      </form>
+    </nav>
+  </header>
+  <main class="wrap">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <p class="flash {{ category }}">{{ message }}</p>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+  <script src="{{ url_for('static', filename='ui.js') }}"></script>
+</body>
+</html>

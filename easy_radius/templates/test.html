@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Test login · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Test login</h1>
+</div>
+<div class="card">
+  <p>Runs <code>radtest</code> against localhost using the localhost client secret. Apply the configuration first so FreeRADIUS is using that secret. For a user limited to some routers, choose the router. The test sets NAS-IP-Address to that router.</p>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="username">Username</label>
+    <input id="username" name="username" value="{{ username }}" required>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" required>
+    <label for="nas_ip">Router</label>
+    <select id="nas_ip" name="nas_ip">
+      <option value="">This server only</option>
+      {% for router in routers %}
+      <option value="{{ router.ip }}" {% if nas_ip == router.ip %}selected{% endif %}>{{ router.site_name }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">Run test</button>
+  </form>
+  {% if result %}
+  <h2 style="margin-top:1.25rem;">Result for {{ result.username }}</h2>
+  <p class="banner {{ 'ok' if result.ok else 'error' }}">
+    {% if result.ok %}radtest finished.{% else %}radtest did not succeed.{% endif %}
+  </p>
+  <pre class="output">{{ result.output }}</pre>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Users · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Users</h1>
+  <a class="button" href="{{ url_for('user_new') }}">Add user</a>
+</div>
+<div class="card">
+  {% if users %}
+  <table>
+    <thead>
+      <tr>
+        <th>Username</th>
+        <th>Password</th>
+        <th>Group</th>
+        <th>Access</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for user in users %}
+      <tr class="{{ '' if user.enabled else 'is-disabled' }}">
+        <td data-label="Username">{{ user.username }}{% if not user.enabled %} <span class="tag">disabled</span>{% endif %}</td>
+        <td data-label="Password">
+          <div class="secret-cell">
+            <code class="mask">••••••••</code>
+            <code class="shown" hidden>{{ user.password }}</code>
+            <button class="secondary small" type="button" data-reveal>Show</button>
+          </div>
+        </td>
+        <td data-label="Group">{{ user.group }}</td>
+        <td data-label="Access">{{ user.access_label }}</td>
+        <td data-label="Actions">
+          <div class="actions">
+            <a class="button secondary small" href="{{ url_for('user_edit', user_id=user.id) }}">Edit</a>
+            <form method="post" action="{{ url_for('user_enabled', user_id=user.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="enabled" value="{{ '0' if user.enabled else '1' }}">
+              <button class="secondary small" type="submit">{{ 'Disable' if user.enabled else 'Enable' }}</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No users yet. Add one, then click Apply.</p>
+  {% endif %}
+</div>
+{% endblock %}

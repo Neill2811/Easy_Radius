@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ title }}</h1>
+  <a href="{{ url_for('users') }}">Back to users</a>
+</div>
+<div class="card">
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="username">Username</label>
+    <input id="username" name="username" value="{{ user.username }}" required>
+    <label for="password">Password</label>
+    <input id="password" name="password" value="{{ user.password }}" required autocomplete="off">
+    <label for="group">Group</label>
+    <select id="group" name="group">
+      {% for group in groups %}
+      <option value="{{ group }}" {% if user.group == group %}selected{% endif %}>{{ group }}</option>
+      {% endfor %}
+    </select>
+    <p class="help">The group is written as Mikrotik-Group.</p>
+    <label>Access</label>
+    <label class="choice"><input type="radio" name="access" value="all" {% if user.access != 'routers' %}checked{% endif %}> All routers</label>
+    <label class="choice"><input type="radio" name="access" value="routers" {% if user.access == 'routers' %}checked{% endif %}> Chosen routers</label>
+    {% if routers %}
+    <div class="checkboxes">
+      {% for router in routers %}
+      <label>
+        <input type="checkbox" name="router_ids" value="{{ router.id }}" {% if router.id in user.router_ids %}checked{% endif %}>
+        {{ router.site_name }} ({{ router.ip }}){% if not router.enabled %} — disabled{% endif %}
+      </label>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="help">Add a router before limiting a user to one.</p>
+    {% endif %}
+    {% if tags %}
+    <p class="help">Site groups</p>
+    <div class="checkboxes">
+      {% for tag in tags %}
+      <label>
+        <input type="checkbox" name="access_tags" value="{{ tag }}" {% if tag in user.access_tags %}checked{% endif %}>
+        {{ tag }}
+      </label>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="help">Add a tag on a router, such as North, to allow a whole site group.</p>
+    {% endif %}
+    <button type="submit">Save</button>
+  </form>
+</div>
+{% endblock %}

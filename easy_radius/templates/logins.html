@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Logins · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Logins</h1>
+</div>
+<div class="card">
+  <form class="filters" method="get">
+    <div>
+      <label for="router">Router</label>
+      <select id="router" name="router">
+        <option value="">All</option>
+        {% for router in routers %}
+        <option value="{{ router.ip }}" {% if router_q == router.ip %}selected{% endif %}>{{ router.site_name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="user">User</label>
+      <input id="user" name="user" value="{{ user_q }}">
+    </div>
+    <div>
+      <label for="result">Result</label>
+      <select id="result" name="result">
+        <option value="">All</option>
+        <option value="Access-Accept" {% if result_q == 'Access-Accept' %}selected{% endif %}>Accept</option>
+        <option value="Access-Reject" {% if result_q == 'Access-Reject' %}selected{% endif %}>Reject</option>
+      </select>
+    </div>
+    <button class="secondary" type="submit">Filter</button>
+  </form>
+  {% if events %}
+  <table>
+    <thead>
+      <tr><th>When</th><th>Result</th><th>User</th><th>Router</th></tr>
+    </thead>
+    <tbody>
+      {% for event in events %}
+      <tr>
+        <td data-label="When">{{ event.when }}</td>
+        <td data-label="Result"><span class="status {{ 'up' if event.result == 'Access-Accept' else 'down' }}">{{ 'Accept' if event.result == 'Access-Accept' else 'Reject' }}</span></td>
+        <td data-label="User">{{ event.user }}</td>
+        <td data-label="Router">{{ event.router }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">{% if has_log %}No matching login lines.{% else %}No login log yet. install.sh adds the FreeRADIUS logger that writes {{ log_path }}.{% endif %}</p>
+  {% endif %}
+</div>
+{% endblock %}

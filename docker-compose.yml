@@ -1,0 +1,24 @@
+# Easy Radius controls the host's FreeRADIUS. network_mode host means the
+# web UI listens on the host's port 8088, so ufw rules apply as usual.
+# privileged, pid host, and nsenter are how the container runs freeradius
+# and systemctl in the host's namespaces.
+services:
+  radius-admin:
+    build: .
+    container_name: radius-admin
+    restart: unless-stopped
+    privileged: true
+    pid: host
+    network_mode: host
+    volumes:
+      - /etc/freeradius:/etc/freeradius
+      - /var/log/freeradius:/var/log/freeradius:ro
+      - ./data:/opt/radius-admin/data
+    environment:
+      RADIUS_ADMIN_DATA_DIR: /opt/radius-admin/data
+      RADIUS_ADMIN_USE_NSENTER: "1"
+      RADIUS_ADMIN_CLIENTS_CONF: /etc/freeradius/3.0/clients.conf
+      RADIUS_ADMIN_USERS_FILE: /etc/freeradius/3.0/mods-config/files/authorize
+      RADIUS_ADMIN_POLICY_FILE: /etc/freeradius/3.0/policy.d/easy_radius
+      RADIUS_ADMIN_AUTH_LOG: /var/log/freeradius/easy-radius-auth.log
+      RADIUS_ADMIN_ACCT_LOG: /var/log/freeradius/easy-radius-acct.log
