@@ -3,46 +3,23 @@
 from __future__ import annotations
 
 import argparse
-import os
-import subprocess
 import sys
 from pathlib import Path
 
 from easy_radius.access import render_access_policy
 from easy_radius.configgen import render_clients_conf, render_users_file
+from easy_radius.perms import write_text
 from easy_radius.store import prepare_state
-
-
-def _chown_freerad(path: Path) -> None:
-    script = (
-        'path="$1"; '
-        'gid="$(getent group freerad | cut -d: -f3 || true)"; '
-        'if [ -n "$gid" ]; then chown "root:$gid" "$path"; fi; '
-        'chmod 640 "$path"'
-    )
-    subprocess.run(["sh", "-c", script, "sh", str(path)], check=False)
 
 
 def write_starter(data_dir: Path, clients_path: Path, users_path: Path, policy_path: Path | None = None) -> None:
     state = prepare_state(data_dir, ensure_admin=False)
     clients_path = Path(clients_path)
     users_path = Path(users_path)
-    paths = [clients_path, users_path]
-    clients_path.parent.mkdir(parents=True, exist_ok=True)
-    users_path.parent.mkdir(parents=True, exist_ok=True)
-    clients_path.write_text(
-        render_clients_conf(state["localhost_secret"], []),
-        encoding="utf-8",
-    )
-    users_path.write_text(render_users_file([]), encoding="utf-8")
+    write_text(clients_path, render_clients_conf(state["localhost_secret"], []))
+    write_text(users_path, render_users_file([]))
     if policy_path is not None:
-        policy_path = Path(policy_path)
-        policy_path.parent.mkdir(parents=True, exist_ok=True)
-        policy_path.write_text(render_access_policy([], []), encoding="utf-8")
-        paths.append(policy_path)
-    for path in paths:
-        os.chmod(path, 0o640)
-        _chown_freerad(path)
+        write_text(Path(policy_path), render_access_policy([], []))
 
 
 def main(argv: list[str] | None = None) -> int:

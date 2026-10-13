@@ -1,8 +1,8 @@
 """JSON data directory for Easy Radius.
 
-Router secrets and RADIUS user passwords are stored so they can be written
-into FreeRADIUS as cleartext. The admin password is stored only as a hash.
-The directory is created mode 0700 and the JSON file mode 0600.
+Router secrets stay in this file because FreeRADIUS needs them. RADIUS user
+passwords and the admin password are stored only as hashes. The directory is
+created mode 0700 and the JSON file mode 0600.
 """
 
 from __future__ import annotations
@@ -14,6 +14,9 @@ import os
 import secrets
 import tempfile
 from pathlib import Path
+
+from easy_radius.configgen import rewrite_cleartext_passwords
+from easy_radius.userhash import migrate_users
 
 PBKDF2_ITERATIONS = 200_000
 ADMIN_USERNAME = "neill"
@@ -104,6 +107,8 @@ def load_state(data_dir: Path) -> dict:
         item["access"] = "routers" if item.get("access") == "routers" else "all"
         item["router_ids"] = [str(value) for value in (item.get("router_ids") or [])]
         item["access_tags"] = _name_list(item.get("access_tags"))
+    if migrate_users(state["users"]):
+        save_state(data_dir, state)
     return state
 
 
@@ -123,6 +128,7 @@ def _name_list(value) -> list[str]:
 def save_state(data_dir: Path, state: dict) -> None:
     data_dir = Path(data_dir)
     _umask_dir(data_dir)
+    migrate_users(state.get("users") or [])
     path = data_path(data_dir)
     payload = json.dumps(state, indent=2, sort_keys=True) + "\n"
     fd, tmp_name = tempfile.mkstemp(dir=data_dir, prefix=".data-", suffix=".json")
@@ -186,10 +192,66 @@ def prepare_state(
         _write_initial_password(data_dir, password)
         if admin_password is None:
             _print_initial_password(password)
+        upgrade_password_storage(data_dir)
         return state
     if changed:
         save_state(data_dir, state)
+    upgrade_password_storage(data_dir)
     return state
+
+
+def upgrade_password_storage(data_dir: Path) -> None:
+    """Hash leftover plaintext user passwords in snapshots and Apply backups.
+
+    data.json is upgraded by load_state. Router secrets are not touched.
+    """
+    data_dir = Path(data_dir)
+    snap_dir = data_dir / "snapshots"
+    if snap_dir.is_dir():
+        for path in snap_dir.glob("*.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            users = payload.get("users") if isinstance(payload, dict) else None
+            if not isinstance(users, list) or not migrate_users(users):
+                continue
+            _write_private_json(path, payload)
+    backup_root = data_dir / "backups"
+    if not backup_root.is_dir():
+        return
+    for path in backup_root.glob("*/users"):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        updated = rewrite_cleartext_passwords(text)
+        if updated == text:
+            continue
+        path.write_text(updated, encoding="utf-8")
+
+
+def _write_private_json(path: Path, payload: dict) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+        handle.write("\n")
+    os.chmod(path, 0o600)
+
+
+def set_admin_password(state: dict, password: str) -> None:
+    """Store a new admin password hash and rotate the session key.
+
+    Rotating the key makes cookies signed with the old key stop working.
+    The plaintext password is not stored.
+    """
+    if len(password) < 12:
+        raise ValueError("Password must be at least 12 characters.")
+    state["admin_password_hash"] = hash_password(password)
+    state["initial_password_shown"] = True
+    state["secret_key"] = secrets.token_hex(32)
 
 
 def check_admin_password(state: dict, username: str, password: str) -> bool:

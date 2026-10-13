@@ -8,6 +8,8 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from easy_radius.userhash import migrate_users
+
 SNAPSHOT_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z(?:-[0-9]+)?$")
 
 
@@ -30,11 +32,13 @@ def save_snapshot(data_dir: Path, state: dict) -> str:
     while (directory / f"{snap_id}.json").exists():
         snap_id = f"{stamp}-{suffix}"
         suffix += 1
+    users = json.loads(json.dumps(state.get("users") or []))
+    migrate_users(users)
     payload = {
         "id": snap_id,
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "routers": json.loads(json.dumps(state.get("routers") or [])),
-        "users": json.loads(json.dumps(state.get("users") or [])),
+        "users": users,
     }
     path = directory / f"{snap_id}.json"
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -79,4 +83,10 @@ def load_snapshot(data_dir: Path, snap_id: str) -> dict:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload.get("routers"), list) or not isinstance(payload.get("users"), list):
         raise SnapshotError("Snapshot is incomplete")
+    if migrate_users(payload["users"]):
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+            handle.write("\n")
+        os.chmod(path, 0o600)
     return payload

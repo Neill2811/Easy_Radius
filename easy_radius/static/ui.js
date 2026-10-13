@@ -20,7 +20,8 @@ document.addEventListener("click", (event) => {
   block.toggleAttribute("hidden", !hidden);
   blockButton.textContent = hidden ? "Hide MikroTik config" : "Copy MikroTik config";
   if (hidden && navigator.clipboard) {
-    const text = block.innerText.trim();
+    const pre = block.querySelector("pre");
+    const text = (pre ? pre.innerText : block.innerText).trim();
     navigator.clipboard.writeText(text).catch(() => {});
   }
 });

@@ -11,7 +11,7 @@ class FakeRunner:
 
     def __call__(self, args, timeout=120):
         self.calls.append(list(args))
-        if args[:2] == ["freeradius", "-XC"]:
+        if len(args) >= 2 and args[-2:] == ["freeradius", "-XC"]:
             return CommandResult(list(args), 0, "Configuration appears to be OK.\n", "")
         if args[:3] == ["systemctl", "is-active", "freeradius"]:
             return CommandResult(list(args), 0, "active\n", "")
@@ -111,8 +111,11 @@ def test_login_csrf_and_router_user_flow(tmp_path):
         },
         follow_redirects=True,
     )
-    assert "alice" in created_user.get_data(as_text=True)
-    assert "write" in created_user.get_data(as_text=True)
+    user_body = created_user.get_data(as_text=True)
+    assert "alice" in user_body
+    assert "write" in user_body
+    assert "Set new password" in user_body
+    assert "example-password" not in user_body
 
     apply_page = client.get("/apply")
     token = _csrf(apply_page.get_data(as_text=True))
@@ -124,7 +127,9 @@ def test_login_csrf_and_router_user_flow(tmp_path):
     assert "example-router-secret" in clients_text
     assert "example-localhost-secret" in clients_text
     users_text = (tmp_path / "authorize").read_text(encoding="utf-8")
-    assert 'alice Cleartext-Password := "example-password"' in users_text
+    assert "Crypt-Password :=" in users_text
+    assert "example-password" not in users_text
+    assert "Cleartext-Password" not in users_text
     assert 'Mikrotik-Group = "write"' in users_text
 
     test_page = client.get("/test")

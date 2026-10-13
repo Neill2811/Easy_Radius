@@ -5,6 +5,19 @@
   <h1>Security</h1>
 </div>
 <div class="card">
+  <h2>Admin password</h2>
+  <p class="help">At least 12 characters. This signs out any other browser that is logged in. The password is stored only as a hash.</p>
+  <form method="post" action="{{ url_for('security_password') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="current_password">Current password</label>
+    <input id="current_password" name="current_password" type="password" autocomplete="current-password" required>
+    <label for="new_password">New password</label>
+    <input id="new_password" name="new_password" type="password" autocomplete="new-password" minlength="12" required>
+    <label for="confirm_password">New password again</label>
+    <input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" minlength="12" required>
+    <button type="submit">Change password</button>
+  </form>
+  <h2 class="section">Authenticator</h2>
   {% if enabled %}
   <p>Authenticator codes are on. You need a code as well as the password to sign in.</p>
   <form method="post" action="{{ url_for('security_disable') }}">

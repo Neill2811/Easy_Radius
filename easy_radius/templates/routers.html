@@ -12,7 +12,7 @@
     <input id="radius_server_address" name="radius_server_address" value="{{ server_address }}" placeholder="192.0.2.1">
     <button class="secondary" type="submit">Save</button>
   </form>
-  <p class="help">Used only for the MikroTik commands. Green means a RADIUS packet was seen in the last 15 minutes.</p>
+  <p class="help">Used only for the MikroTik commands. The router IP must be an address that router actually owns, because those commands set src-address to it. Without src-address, a router behind NAT can send from a public address FreeRADIUS does not know, and the packet is ignored. Green means a RADIUS packet was seen in the last 15 minutes.</p>
   {% if routers %}
   <table>
     <thead>
@@ -57,6 +57,7 @@
       {% if router.mikrotik %}
       <tr id="mt-{{ router.id }}" hidden>
         <td colspan="5">
+          <p class="help">Use the first line on a new router. Use the second if this server is already in /radius. src-address is {{ router.ip }}.</p>
           <pre class="output mikrotik">{{ router.mikrotik }}</pre>
         </td>
       </tr>

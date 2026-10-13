@@ -5,8 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from copy import deepcopy
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+from easy_radius.userhash import migrate_users
 
 MAGIC = b"EASYRADIUS1"
 KDF_ITERATIONS = 200_000
@@ -17,10 +20,12 @@ class BackupError(Exception):
 
 
 def export_payload(state: dict) -> dict:
+    users = deepcopy(state.get("users") or [])
+    migrate_users(users)
     return {
         "version": 1,
         "routers": state.get("routers") or [],
-        "users": state.get("users") or [],
+        "users": users,
         "localhost_secret": state.get("localhost_secret") or "",
         "radius_server_address": state.get("radius_server_address") or "",
         "audit": state.get("audit") or [],
@@ -35,8 +40,10 @@ def apply_payload(state: dict, payload: dict) -> None:
         raise BackupError("This file is not an Easy Radius backup.")
     if not isinstance(payload.get("routers"), list) or not isinstance(payload.get("users"), list):
         raise BackupError("This backup is incomplete.")
+    users = payload["users"]
+    migrate_users(users)
     state["routers"] = payload["routers"]
-    state["users"] = payload["users"]
+    state["users"] = users
     if payload.get("localhost_secret"):
         state["localhost_secret"] = payload["localhost_secret"]
     state["radius_server_address"] = payload.get("radius_server_address") or ""
