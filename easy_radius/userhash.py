@@ -1,6 +1,9 @@
-"""SHA-512 crypt hashes for RADIUS user passwords.
+"""Password hashes for RADIUS users.
 
-FreeRADIUS checks these with the pap module (Crypt-Password, ``$6$``).
+PAP uses a SHA-512 crypt hash (Crypt-Password, ``$6$``). MS-CHAP and
+MS-CHAPv2, which MikroTik Winbox sends, use an NT hash (NT-Password):
+MD4 of the password encoded as UTF-16LE. Neither hash can be turned back
+into the password, and a crypt hash cannot be turned into an NT hash.
 The plaintext password is not stored.
 """
 
@@ -9,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import re
 import secrets
+import struct
 
 _ALPHABET = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 _SALT_CHARS = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -115,8 +119,114 @@ def hash_user_password(password: str, salt: str | None = None, rounds: int = 500
     return f"$6$rounds={rounds}${salt}${encoded}"
 
 
+_NT_HASH = re.compile(r"^[0-9A-Fa-f]{32}$")
+
+
+def md4(data: bytes) -> bytes:
+    """MD4 digest. hashlib.md4 is unavailable on OpenSSL 3 / Python 3.12."""
+
+    def leftrotate(value: int, bits: int) -> int:
+        return ((value << bits) | (value >> (32 - bits))) & 0xFFFFFFFF
+
+    def f(x: int, y: int, z: int) -> int:
+        return (x & y) | (~x & z)
+
+    def g(x: int, y: int, z: int) -> int:
+        return (x & y) | (x & z) | (y & z)
+
+    def h(x: int, y: int, z: int) -> int:
+        return x ^ y ^ z
+
+    message = bytearray(data)
+    bit_length = (len(data) * 8) & 0xFFFFFFFFFFFFFFFF
+    message.append(0x80)
+    while (len(message) % 64) != 56:
+        message.append(0)
+    message += struct.pack("<Q", bit_length)
+
+    a0 = 0x67452301
+    b0 = 0xEFCDAB89
+    c0 = 0x98BADCFE
+    d0 = 0x10325476
+    for offset in range(0, len(message), 64):
+        words = list(struct.unpack("<16I", message[offset : offset + 64]))
+        a, b, c, d = a0, b0, c0, d0
+
+        def step(func, val_a, val_b, val_c, val_d, word, bits, constant):
+            return leftrotate((val_a + func(val_b, val_c, val_d) + word + constant) & 0xFFFFFFFF, bits)
+
+        for index, word in enumerate(words):
+            shift = (3, 7, 11, 19)[index % 4]
+            if index % 4 == 0:
+                a = step(f, a, b, c, d, word, shift, 0)
+            elif index % 4 == 1:
+                d = step(f, d, a, b, c, word, shift, 0)
+            elif index % 4 == 2:
+                c = step(f, c, d, a, b, word, shift, 0)
+            else:
+                b = step(f, b, c, d, a, word, shift, 0)
+
+        round2 = (0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15)
+        for index, word_index in enumerate(round2):
+            shift = (3, 5, 9, 13)[index % 4]
+            word = (words[word_index] + 0x5A827999) & 0xFFFFFFFF
+            if index % 4 == 0:
+                a = step(g, a, b, c, d, word, shift, 0)
+            elif index % 4 == 1:
+                d = step(g, d, a, b, c, word, shift, 0)
+            elif index % 4 == 2:
+                c = step(g, c, d, a, b, word, shift, 0)
+            else:
+                b = step(g, b, c, d, a, word, shift, 0)
+
+        round3 = (0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15)
+        for index, word_index in enumerate(round3):
+            shift = (3, 9, 11, 15)[index % 4]
+            word = (words[word_index] + 0x6ED9EBA1) & 0xFFFFFFFF
+            if index % 4 == 0:
+                a = step(h, a, b, c, d, word, shift, 0)
+            elif index % 4 == 1:
+                d = step(h, d, a, b, c, word, shift, 0)
+            elif index % 4 == 2:
+                c = step(h, c, d, a, b, word, shift, 0)
+            else:
+                b = step(h, b, c, d, a, word, shift, 0)
+
+        a0 = (a0 + a) & 0xFFFFFFFF
+        b0 = (b0 + b) & 0xFFFFFFFF
+        c0 = (c0 + c) & 0xFFFFFFFF
+        d0 = (d0 + d) & 0xFFFFFFFF
+    return struct.pack("<4I", a0, b0, c0, d0)
+
+
+def nt_hash(password: str) -> str:
+    """NT-Password: MD4 of the password as UTF-16LE, uppercase hex."""
+    if password == "":
+        raise ValueError("Password is empty.")
+    return md4(password.encode("utf-16-le")).hex().upper()
+
+
+def is_nt_hash(value: str) -> bool:
+    return bool(_NT_HASH.fullmatch(value or ""))
+
+
+def needs_mschap_password(user: dict) -> bool:
+    """True when PAP can work but Winbox cannot, because there is no NT hash."""
+    return is_sha512_crypt(str(user.get("password") or "")) and not is_nt_hash(str(user.get("nt_password") or ""))
+
+
+def assign_user_password(user: dict, password: str) -> None:
+    """Store the crypt hash and the NT hash. The plaintext is not kept."""
+    user["password"] = hash_user_password(password)
+    user["nt_password"] = nt_hash(password)
+
+
 def migrate_users(users: list) -> bool:
-    """Replace plaintext user passwords with SHA-512 crypt hashes, in place."""
+    """Replace plaintext user passwords with both hashes, in place.
+
+    A user who already has only a crypt hash is left alone. That hash cannot
+    be converted into an NT hash.
+    """
     changed = False
     for user in users:
         if not isinstance(user, dict):
@@ -124,6 +234,6 @@ def migrate_users(users: list) -> bool:
         password = user.get("password")
         if not isinstance(password, str) or password == "" or is_sha512_crypt(password):
             continue
-        user["password"] = hash_user_password(password)
+        assign_user_password(user, password)
         changed = True
     return changed

@@ -79,6 +79,7 @@ def test_startup_hashes_plaintext_users_snapshots_and_backups(tmp_path):
     raw = (data / "data.json").read_text(encoding="utf-8")
     saved = json.loads(raw)
     assert is_sha512_crypt(saved["users"][0]["password"])
+    assert saved["users"][0]["nt_password"] == "BB7FAFD45FABBDBD035ECD5A7A78C01D"
     assert "example-password" not in raw
     assert saved["routers"][0]["secret"] == "example-router-secret"
     assert saved["audit"][0]["detail"] == "Added alice"
@@ -93,6 +94,8 @@ def test_startup_hashes_plaintext_users_snapshots_and_backups(tmp_path):
     assert "example-password" not in users_raw
     parsed = parse_users_file(users_raw)
     assert is_sha512_crypt(parsed[0]["password"])
+    assert parsed[0]["nt_password"] == "BB7FAFD45FABBDBD035ECD5A7A78C01D"
+    assert "NT-Password := 0xBB7FAFD45FABBDBD035ECD5A7A78C01D" in users_raw
     import crypt
 
     assert crypt.crypt("example-password", parsed[0]["password"]) == parsed[0]["password"]
@@ -225,6 +228,92 @@ def test_ui_sets_a_new_password_without_showing_the_old_one(tmp_path):
     assert "example-password" not in raw
     assert "example-password-99" not in raw
     assert all("password" not in event["detail"].lower() for event in load_state(data)["audit"])
+
+
+def test_nt_hash_matches_the_known_password_vector():
+    from easy_radius.userhash import nt_hash
+
+    assert nt_hash("password") == "8846F7EAEE8FB117AD06BDD830B7586C"
+    assert nt_hash("example-password") == "BB7FAFD45FABBDBD035ECD5A7A78C01D"
+
+
+def test_users_file_writes_crypt_and_nt_as_check_items():
+    from easy_radius.userhash import hash_user_password, nt_hash
+
+    crypt = hash_user_password("example-password", salt="examplesalt1234")
+    nt = nt_hash("example-password")
+    text = render_users_file(
+        [{"username": "alice", "password": crypt, "nt_password": nt, "group": "write"}],
+    )
+    assert f'alice Crypt-Password := "{crypt}", NT-Password := 0x{nt}' in text
+    assert "Cleartext-Password" not in text
+    assert "example-password" not in text
+    parsed = parse_users_file(text)[0]
+    assert parsed["password"] == crypt
+    assert parsed["nt_password"] == nt
+
+
+def test_crypt_only_user_keeps_pap_and_shows_the_winbox_badge(tmp_path):
+    from easy_radius.userhash import hash_user_password, is_nt_hash, is_sha512_crypt, needs_mschap_password
+
+    data = tmp_path / "data"
+    prepare_state(data, admin_password="example-password")
+    state = load_state(data)
+    crypt = hash_user_password("example-password", salt="examplesalt1234")
+    state["users"] = [
+        {
+            "id": "u1",
+            "username": "alice",
+            "password": crypt,
+            "group": "write",
+            "enabled": True,
+            "access": "all",
+            "router_ids": [],
+            "access_tags": [],
+        }
+    ]
+    save_state(data, state)
+    saved = load_state(data)
+    assert needs_mschap_password(saved["users"][0])
+    assert not is_nt_hash(str(saved["users"][0].get("nt_password") or ""))
+    text = render_users_file(saved["users"])
+    assert "Crypt-Password" in text
+    assert "NT-Password" not in text
+
+    app = create_app(data_dir=data, runner=lambda args, timeout=120: None)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    page = client.get("/login")
+    token = _csrf(page.get_data(as_text=True))
+    client.post("/login", data={"username": "neill", "password": "example-password", "csrf_token": token})
+    body = client.get("/users").get_data(as_text=True)
+    assert "Set password again to enable Winbox/MS-CHAP" in body
+    assert crypt not in body
+    edit = client.get("/users/u1/edit")
+    edit_body = edit.get_data(as_text=True)
+    assert "Set password again to enable Winbox/MS-CHAP" in edit_body
+    token = _csrf(edit_body)
+    client.post(
+        "/users/u1/edit",
+        data={
+            "csrf_token": token,
+            "username": "alice",
+            "password": "example-password-99",
+            "group": "write",
+            "access": "all",
+        },
+        follow_redirects=True,
+    )
+    updated = load_state(data)["users"][0]
+    raw = data_path(data).read_text(encoding="utf-8")
+    assert is_sha512_crypt(updated["password"])
+    assert updated["password"] != crypt
+    assert is_nt_hash(updated["nt_password"])
+    assert "example-password" not in raw
+    assert "example-password-99" not in raw
+    assert not needs_mschap_password(updated)
+    again = client.get("/users").get_data(as_text=True)
+    assert "Set password again to enable Winbox/MS-CHAP" not in again
 
 
 def test_routers_page_explains_src_address(tmp_path):

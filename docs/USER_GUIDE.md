@@ -104,7 +104,7 @@ These lines are what you paste on the router. They stay hidden until you click, 
 
 **Users**
 
-These are the people who log in through RADIUS. The group becomes `Mikrotik-Group` (`full`, `write`, or `read`). The Access column says **All routers**, or the routers and site groups that person is limited to. The password is stored only as a SHA-512 hash. The page cannot show it. On an upgrade, existing plaintext passwords are hashed at startup. Click **Apply** once so FreeRADIUS gets the hashed users file. Login stays PAP, which is what MikroTik `service=login` and the Test page use.
+These are the people who log in through RADIUS. The group becomes `Mikrotik-Group` (`full`, `write`, or `read`). The Access column says **All routers**, or the routers and site groups that person is limited to. The password is stored only as hashes. The page cannot show it. PAP (SSH login and the Test page) uses a SHA-512 hash. Winbox uses MS-CHAPv2, which needs a second hash, the NT hash. On an upgrade, an existing plaintext password is turned into both hashes. A password that was saved as only the SHA-512 hash cannot be converted. That row shows **Set password again to enable Winbox/MS-CHAP**. Set the password again, then click **Apply**.
 
 1. **Add user** creates someone new.
 2. **Set new password** opens the edit page so you can replace the password. Leave that box blank to keep the current one. **Edit** changes the name, group, or access.
@@ -178,7 +178,7 @@ If `freeradius -XC` fails, FreeRADIUS is not restarted and the previous files ar
 This runs `radtest` on the server, against localhost, using the localhost client secret. It checks that FreeRADIUS will accept a user. Apply first, or the test is still talking to the old config.
 
 1. Click **Test**.
-2. Type the username and password. This is PAP, the same method MikroTik uses for `service=login`. FreeRADIUS checks it against the stored hash.
+2. Type the username and password. This is PAP, the same method an SSH login uses. Winbox uses MS-CHAP instead, which FreeRADIUS checks with the NT hash stored beside the PAP hash.
 3. For someone allowed on all routers, **This server only** is enough.
 4. For someone limited to chosen routers, pick one of those routers in the **Router** list. The test sets `NAS-IP-Address` to that router.
 5. Click **Run test**.
