@@ -235,6 +235,10 @@ tr.is-disabled td { color: var(--muted); }
   font-size: 0.75rem;
   font-weight: 700;
 }
+.tag.warn {
+  background: #fff3e6;
+  color: #8a4b08;
+}
 h2.section { margin-top: 1.5rem; }
 pre.mikrotik { margin: 0.4rem 0; }
 .choice { font-weight: 500; margin: 0.35rem 0; }

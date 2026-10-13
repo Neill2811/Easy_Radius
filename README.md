@@ -83,7 +83,7 @@ Package upgrades during install keep the existing config files (`--force-confold
 ## What the pages do
 
 - **Routers.** Site name, IP, secret, and a green or red status from the last RADIUS packet (green if one arrived in the last 15 minutes). Secrets stay hidden until you click Show. Disable a router instead of deleting it. **Copy MikroTik config** shows, only after you click, the RouterOS commands with that router's secret filled in. The commands set `src-address` to the router IP stored here, which must be an address the router itself owns. Without that, a router behind NAT can send from a public address FreeRADIUS does not know, and the packet is ignored. Set "This server's address" first; that address is what the router should use. The second command updates a RADIUS entry that is already on the router.
-- **Users.** Username, group `full` / `write` / `read` (`Mikrotik-Group`), and access. The password is stored only as a SHA-512 crypt hash (`$6$`) and cannot be shown again. **Set new password** replaces it. Access is **All routers** unless you choose routers or a site group. A site group is a tag on the router, such as `North`. Disable a user instead of deleting them. Disabled routers and users are left out of the files Apply writes. A restricted user is rejected on any other router. The check uses the packet source address and the client shortname, so a router cannot pretend to be another site. The Test page can still imitate a router from this server by setting NAS-IP-Address. Login uses PAP, which is what MikroTik `service=login` and `radtest` send. CHAP cannot be used, because the cleartext password is not kept.
+- **Users.** Username, group `full` / `write` / `read` (`Mikrotik-Group`), and access. The password is stored only as two hashes: SHA-512 crypt (`$6$`) for PAP, and an NT hash for MS-CHAP / MS-CHAPv2. It cannot be shown again. **Set new password** replaces both. Access is **All routers** unless you choose routers or a site group. A site group is a tag on the router, such as `North`. Disable a user instead of deleting them. Disabled routers and users are left out of the files Apply writes. A restricted user is rejected on any other router. The check uses the packet source address and the client shortname, so a router cannot pretend to be another site. The Test page can still imitate a router from this server by setting NAS-IP-Address. SSH logins and `radtest` use PAP. MikroTik Winbox uses MS-CHAPv2. A user saved when only the crypt hash was stored cannot be converted; the Users page shows **Set password again to enable Winbox/MS-CHAP** until you set the password again.
 - **Logins.** Recent Access-Accept and Access-Reject lines, filtered by router, user, and result.
 - **Sessions.** Who is logged in now, and recent accounting (start, update, stop).
 - **Apply.** Backs up the current files under `/opt/radius-admin/data/backups/<timestamp>/`, writes the generated files, restores each file's owner and mode (new files are `freerad:freerad` mode `0640`), runs `sudo -u freerad freeradius -XC`, then `systemctl restart freeradius` only on success. If the restart fails, Apply prints the journal and puts the previous files back. A successful Apply also keeps a snapshot. An existing install that still has plaintext user passwords hashes them on startup. The users file is rewritten with those hashes on the next Apply.
@@ -99,14 +99,14 @@ Package upgrades during install keep the existing config files (`--force-confold
 
 The container mounts `/var/log/freeradius` read-only so the pages can read them. The installer runs `sudo -u freerad freeradius -XC` after it writes files. If that check or the restart fails, it prints the last journal lines, restores the backup from `/root/freeradius-backup-TIMESTAMP`, and stops before Docker starts.
 
-Generated users look like this. The value is a SHA-512 crypt hash of `example-password`, not the password:
+Generated users look like this. Both values are hashes of `example-password`, not the password. `Crypt-Password` is SHA-512 crypt. `NT-Password` is MD4 of the password as UTF-16LE.
 
 ```text
-alice Crypt-Password := "$6$examplesalt1234$ZvOLEUdnZysdHXmagNW4UQjiz0Gd0YHrrNVCWgqrT4vRLQ9ctjcGMuoQTGZ6b7j1EbVNbmxRGFMZ5TfjLVNNt1"
+alice Crypt-Password := "$6$examplesalt1234$ZvOLEUdnZysdHXmagNW4UQjiz0Gd0YHrrNVCWgqrT4vRLQ9ctjcGMuoQTGZ6b7j1EbVNbmxRGFMZ5TfjLVNNt1", NT-Password := 0xBB7FAFD45FABBDBD035ECD5A7A78C01D
     Mikrotik-Group = "write"
 ```
 
-FreeRADIUS checks that hash with the `pap` module. Router secrets stay in `/opt/radius-admin/data/data.json` because FreeRADIUS needs them. User passwords and the admin password are stored only as hashes, including in encrypted backups and History snapshots. The data directory is mode `0700`.
+FreeRADIUS checks `Crypt-Password` with the `pap` module (SSH and `radtest`) and `NT-Password` with the `mschap` module (Winbox). Both are check items, on the same line as the username. Router secrets stay in `/opt/radius-admin/data/data.json` because FreeRADIUS needs them. User passwords and the admin password are stored only as hashes, including in encrypted backups and History snapshots. The data directory is mode `0700`.
 
 ## Uninstall and rollback
 

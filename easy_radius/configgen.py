@@ -10,7 +10,7 @@ import ipaddress
 import re
 from datetime import datetime, timezone
 
-from easy_radius.userhash import hash_user_password, is_sha512_crypt
+from easy_radius.userhash import hash_user_password, is_nt_hash, is_sha512_crypt, nt_hash
 
 GROUPS = ("full", "write", "read")
 _CLIENT_NAME = re.compile(r"[^A-Za-z0-9_]+")
@@ -125,11 +125,17 @@ def render_users_file(users: list[dict], when: datetime | None = None) -> str:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@+-]*", username):
             raise ConfigError(f"Unsupported username: {username}")
         stored = str(user.get("password") or "")
+        nt = str(user.get("nt_password") or "")
         if not stored:
             raise ConfigError(f"Missing password hash for {username}")
         if not is_sha512_crypt(stored):
+            if not is_nt_hash(nt):
+                nt = nt_hash(stored)
             stored = hash_user_password(stored)
-        lines.append(f"{username} Crypt-Password := {_quote(stored)}")
+        check = f"{username} Crypt-Password := {_quote(stored)}"
+        if is_nt_hash(nt):
+            check += f", NT-Password := 0x{nt.upper()}"
+        lines.append(check)
         lines.append(f'    Mikrotik-Group = "{group}"')
         lines.append("")
     if not users:
@@ -209,7 +215,9 @@ def parse_users_file(text: str) -> list[dict]:
     lines = text.splitlines()
     index = 0
     user_re = re.compile(
-        r'^([A-Za-z0-9][A-Za-z0-9_.@+-]*)\s+(?:Cleartext-Password|Crypt-Password)\s+:=\s+"(.*)"\s*$'
+        r'^(?P<user>[A-Za-z0-9][A-Za-z0-9_.@+-]*)\s+'
+        r'(?:Cleartext-Password|Crypt-Password)\s+:=\s+"(?P<pw>.*)"'
+        r'(?:,\s*NT-Password\s+:=\s+0x(?P<nt>[0-9A-Fa-f]{32}))?\s*$'
     )
     group_re = re.compile(r'^\s+Mikrotik-Group\s+=\s+"(full|write|read)"\s*$')
     while index < len(lines):
@@ -221,17 +229,18 @@ def parse_users_file(text: str) -> list[dict]:
         if not match:
             raise ConfigError(f"Unrecognised users line: {line}")
         if index + 1 >= len(lines):
-            raise ConfigError(f"Missing Mikrotik-Group for {match.group(1)}")
+            raise ConfigError(f"Missing Mikrotik-Group for {match.group('user')}")
         group_match = group_re.match(lines[index + 1])
         if not group_match:
-            raise ConfigError(f"Missing Mikrotik-Group for {match.group(1)}")
-        users.append(
-            {
-                "username": match.group(1),
-                "password": unescape_radius_string(match.group(2)),
-                "group": group_match.group(1),
-            }
-        )
+            raise ConfigError(f"Missing Mikrotik-Group for {match.group('user')}")
+        parsed = {
+            "username": match.group("user"),
+            "password": unescape_radius_string(match.group("pw")),
+            "group": group_match.group(1),
+        }
+        if match.group("nt"):
+            parsed["nt_password"] = match.group("nt").upper()
+        users.append(parsed)
         index += 2
     return users
 
@@ -251,8 +260,10 @@ def rewrite_cleartext_passwords(text: str) -> str:
         if not match:
             out.append(line)
             continue
-        stored = hash_user_password(unescape_radius_string(match.group(2)))
-        out.append(f"{match.group(1)} Crypt-Password := {_quote(stored)}")
+        plain = unescape_radius_string(match.group(2))
+        stored = hash_user_password(plain)
+        nt = nt_hash(plain)
+        out.append(f"{match.group(1)} Crypt-Password := {_quote(stored)}, NT-Password := 0x{nt}")
         changed = True
     if not changed:
         return text

@@ -48,7 +48,7 @@ from easy_radius.store import (
     set_admin_password,
 )
 from easy_radius.totp import generate_secret, provisioning_uri, verify_totp
-from easy_radius.userhash import hash_user_password
+from easy_radius.userhash import assign_user_password, needs_mschap_password
 from easy_radius.validate import canonical_ip, validate_router, validate_user
 
 GROUPS = ("full", "write", "read")
@@ -306,8 +306,9 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         state = load_state(app.config["DATA_DIR"])
         shown = []
         for user in state["users"]:
-            row = {key: value for key, value in user.items() if key != "password"}
+            row = {key: value for key, value in user.items() if key not in {"password", "nt_password"}}
             row["access_label"] = access_label(user, state["routers"])
+            row["needs_mschap"] = needs_mschap_password(user)
             shown.append(row)
         return render_template("users.html", users=shown)
 
@@ -358,7 +359,6 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
             {
                 "id": secrets.token_hex(8),
                 "username": name,
-                "password": hash_user_password(password),
                 "group": group,
                 "enabled": True,
                 "access": access,
@@ -366,6 +366,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
                 "access_tags": access_tags,
             }
         )
+        assign_user_password(state["users"][-1], password)
         record(state, "user.add", f"Added {name} ({group}, {access_label(state['users'][-1], state['routers'])})")
         save_state(app.config["DATA_DIR"], state)
         flash("User saved. Click Apply before FreeRADIUS uses it.", "ok")
@@ -377,7 +378,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         user = _find(state["users"], user_id)
         if user is None:
             abort(404)
-        shown = {key: value for key, value in user.items() if key != "password"}
+        shown = {key: value for key, value in user.items() if key not in {"password", "nt_password"}}
         return render_template(
             "user_form.html",
             user=shown,
@@ -388,6 +389,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
             title="Edit user",
             password_label="Set new password",
             require_password=False,
+            needs_mschap=needs_mschap_password(user),
         )
 
     @app.post("/users/<user_id>/edit")
@@ -428,10 +430,11 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
                 title="Edit user",
                 password_label="Set new password",
                 require_password=False,
+                needs_mschap=needs_mschap_password(user),
             ), 400
         user["username"] = username.strip()
         if password:
-            user["password"] = hash_user_password(password)
+            assign_user_password(user, password)
         user["group"] = group
         user["access"] = access
         user["router_ids"] = router_ids

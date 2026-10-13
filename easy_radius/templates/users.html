@@ -6,7 +6,7 @@
   <a class="button" href="{{ url_for('user_new') }}">Add user</a>
 </div>
 <div class="card">
-  <p class="help">Passwords are stored only as a hash and cannot be shown. Use <strong>Set new password</strong> to replace one, then click Apply.</p>
+  <p class="help">Passwords are stored only as hashes and cannot be shown. Use <strong>Set new password</strong> to replace one, then click Apply. SSH logins use PAP. Winbox uses MS-CHAP, which needs the password to be set again if the badge is showing.</p>
   {% if users %}
   <table>
     <thead>
@@ -24,6 +24,7 @@
         <td data-label="Username">{{ user.username }}{% if not user.enabled %} <span class="tag">disabled</span>{% endif %}</td>
         <td data-label="Password">
           <a class="button secondary small" href="{{ url_for('user_edit', user_id=user.id) }}#password">Set new password</a>
+          {% if user.needs_mschap %}<span class="tag warn">Set password again to enable Winbox/MS-CHAP</span>{% endif %}
         </td>
         <td data-label="Group">{{ user.group }}</td>
         <td data-label="Access">{{ user.access_label }}</td>

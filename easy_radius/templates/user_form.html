@@ -13,7 +13,8 @@
     <input id="username" name="username" value="{{ user.username }}" required>
     <label for="password">{{ password_label }}</label>
     <input id="password" name="password" type="password" value="" {% if require_password %}required{% endif %} autocomplete="new-password">
-    <p class="help">{% if require_password %}Stored only as a hash. It cannot be shown again.{% else %}Leave this blank to keep the current password. A new one is stored only as a hash.{% endif %}</p>
+    <p class="help">{% if require_password %}Stored only as hashes for PAP and Winbox (MS-CHAP). It cannot be shown again.{% else %}Leave this blank to keep the current password. A new one replaces both hashes.{% endif %}</p>
+    {% if needs_mschap %}<p class="error">Set password again to enable Winbox/MS-CHAP</p>{% endif %}
     <label for="group">Group</label>
     <select id="group" name="group">
       {% for group in groups %}
