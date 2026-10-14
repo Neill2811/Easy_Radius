@@ -113,28 +113,6 @@ def evaluate(session, server_address: str = "") -> list[dict]:
     return checks
 
 
-def service_summary(session) -> list[dict]:
-    """Every /ip service row: name, port, enabled or disabled, allowed addresses."""
-    services = session.rows("/ip/service") if hasattr(session, "rows") else [session.get("/ip/service")]
-    summary = []
-    for row in services:
-        if not isinstance(row, dict):
-            continue
-        name = str(row.get("name") or "").strip()
-        if not name:
-            continue
-        addresses = _address_list(row)
-        summary.append(
-            {
-                "name": name,
-                "port": _port(row),
-                "state": "disabled" if _disabled(row.get("disabled")) else "enabled",
-                "addresses": ",".join(addresses),
-            }
-        )
-    return summary
-
-
 def _ftp(row: dict | None) -> tuple[bool, str]:
     """FTP must stay enabled and limited to specific addresses."""
     return _must_be_restricted(row)
