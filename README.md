@@ -94,9 +94,13 @@ Package upgrades during install keep the existing config files (`--force-confold
 - **Inventory.** Groups routers by site group and shows model, serial, version, uptime, and licence level. Download the same table as CSV.
 
 Third-party licences are listed in [LICENSES.md](LICENSES.md).
+
 - **Test.** Runs `radtest` against `127.0.0.1` with the localhost client secret.
 - **History.** Who changed what, and when. **Roll back** on a snapshot puts those routers and users back and applies them.
 - **Backup.** Download or restore one passphrase-encrypted file. The passphrase is not stored. A restore replaces routers, users, the localhost secret, authenticator setup, and the admin password. Click Apply afterwards.
+- **Monitoring.** A quiet router, high CPU or memory, and a burst of failed logins can email you or message a Telegram bot. SMTP passwords and the bot token are encrypted and are not shown after you save them.
+- **Access.** Give one RADIUS user extra routers or a site group for a number of hours. FreeRADIUS is updated at once, and the extra access is removed when the time runs out.
+- **Reports.** Download a PDF of that month's changes and login lines. On the first morning of the month a short email notice is sent if email alerts are set.
 - **Security.** Change the admin password, and optional authenticator codes for the `neill` login. Leave authenticator codes off if you do not want them. The admin password is stored only as a hash. Changing it signs out other browsers.
 
 `install.sh` enables a FreeRADIUS `linelog` for logins and accounting and hooks it into the site's `post-auth`, reject, and `accounting` sections. It does not replace `clients.conf` or the users file when those already exist. Logs are:

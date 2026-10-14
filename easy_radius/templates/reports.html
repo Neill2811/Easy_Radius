@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Reports · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Reports</h1>
+</div>
+<div class="card">
+  <p class="help">A PDF of changes and login lines for one month. On the first day of the month, after 06:00 UTC, Easy Radius notes that the monthly report is ready and emails a short notice if email alerts are configured.</p>
+  <form method="post" action="{{ url_for('reports_download') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="month">Month</label>
+    <input id="month" name="month" placeholder="2026-10">
+    <label class="choice"><input type="checkbox" name="email" value="yes"> Also email a notice</label>
+    <button type="submit">Download PDF</button>
+  </form>
+</div>
+{% endblock %}
