@@ -57,7 +57,7 @@
       {% if router.mikrotik %}
       <tr id="mt-{{ router.id }}" hidden>
         <td colspan="5">
-          <p class="help">Use the first line on a new router. Use the second if this server is already in /radius. src-address is {{ router.ip }}.</p>
+          <p class="help">Use the first line on a new router. Use the second if this server is already in /radius. src-address is {{ router.ip }}. The later lines create an API-SSL certificate for that address and allow only this server on port 8729. A certificate named api-ssl-ca or api-ssl is left alone, so you can paste the script again. The firewall line is commented out. Uncomment it if the input chain ends with a drop rule. The plaintext API is not changed.</p>
           <pre class="output mikrotik">{{ router.mikrotik }}</pre>
         </td>
       </tr>

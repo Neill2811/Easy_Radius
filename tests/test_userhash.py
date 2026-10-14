@@ -344,5 +344,9 @@ def test_routers_page_explains_src_address(tmp_path):
     assert "src-address=192.0.2.10" in body
     assert "timeout=3s" in body
     assert "/radius set [find address=192.0.2.1]" in body
+    assert "common-name=192.0.2.10" in body
+    assert "address=192.0.2.1/32" in body
+    assert "name=api-ssl-ca" in body
+    assert "drop rule" in body
     assert "NAT" in body
     assert "example-router-secret" in body

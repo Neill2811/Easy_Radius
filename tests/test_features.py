@@ -77,12 +77,32 @@ def test_mikrotik_commands_set_src_address_to_the_router_ip():
         "src-address=192.0.2.10 timeout=3s\n"
         "/radius set [find address=192.0.2.1] src-address=192.0.2.10 secret=example-router-secret\n"
         "/user aaa set use-radius=yes\n"
+        ":if ([:len [/certificate find name=api-ssl-ca]] = 0) do={\n"
+        "/certificate add name=api-ssl-ca common-name=api-ssl-ca "
+        "key-usage=key-cert-sign,crl-sign days-valid=3650\n"
+        "/certificate sign api-ssl-ca\n"
+        ":delay 5\n"
+        "}\n"
+        ":if ([:len [/certificate find name=api-ssl]] = 0) do={\n"
+        "/certificate add name=api-ssl common-name=192.0.2.10 days-valid=3650\n"
+        "/certificate sign api-ssl ca=api-ssl-ca\n"
+        ":delay 5\n"
+        "}\n"
+        "/ip service set api-ssl certificate=api-ssl address=192.0.2.1/32 disabled=no\n"
+        "# Uncomment the next line if the input chain ends with a drop rule.\n"
+        "# /ip firewall filter add chain=input protocol=tcp dst-port=8729 "
+        'src-address=192.0.2.1 action=accept place-before=0 comment="Easy Radius API-SSL"\n'
     )
+    assert "8728" not in text
+    assert "ftp" not in text.lower()
+    assert "snmp" not in text.lower()
     quoted = mikrotik_commands("192.0.2.1", 'has space "quote"', "192.0.2.10")
     assert 'secret="has space \\"quote\\""' in quoted
     v6 = mikrotik_commands("2001:db8::1", "example-router-secret", "2001:db8::10")
     assert 'address="2001:db8::1"' in v6
     assert 'src-address="2001:db8::10"' in v6
+    assert 'common-name="2001:db8::10"' in v6
+    assert 'address="2001:db8::1/128"' in v6
 
 
 def test_auth_log_filters_and_ignores_junk():
