@@ -761,12 +761,14 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         flash("Authenticator codes are off.", "ok")
         return redirect(url_for("security"))
 
+    from easy_radius.assets_web import register_assets
     from easy_radius.automation_web import register_automation
     from easy_radius.ops_web import register_ops
     from easy_radius.watch_web import register_watch
 
     register_automation(app)
     register_ops(app)
+    register_assets(app)
     register_watch(app)
     return app
 

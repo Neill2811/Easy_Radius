@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Inventory · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Inventory</h1>
+  <a class="button secondary" href="{{ url_for('inventory_csv') }}">Download CSV</a>
+</div>
+<div class="card">
+  <form method="post" action="{{ url_for('inventory_refresh') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Refresh from routers</button>
+  </form>
+  <p class="help">Routers are grouped by site group. A router with two tags appears in both groups. This is the site map: each block is one group.</p>
+</div>
+{% for group in groups %}
+<div class="card">
+  <h2>{{ group.name }}</h2>
+  <table>
+    <thead><tr><th>Site</th><th>IP</th><th>Model</th><th>Serial</th><th>Version</th><th>Uptime</th><th>Licence</th></tr></thead>
+    <tbody>
+      {% for router in group.routers %}
+      {% set facts = router.facts or {} %}
+      <tr class="{{ '' if router.enabled else 'is-disabled' }}">
+        <td>{{ router.site_name }}</td>
+        <td>{{ router.ip }}</td>
+        <td>{{ facts.model }}</td>
+        <td>{{ facts.serial }}</td>
+        <td>{{ facts.version }}</td>
+        <td>{{ facts.uptime }}</td>
+        <td>{{ facts.licence }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><p class="empty">No routers yet.</p></div>
+{% endfor %}
+{% endblock %}

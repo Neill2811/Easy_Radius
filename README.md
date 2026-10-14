@@ -90,6 +90,8 @@ Package upgrades during install keep the existing config files (`--force-confold
 - **Automation.** Tasks are YAML or JSON lists of RouterOS paths to set, such as `/ip/dns set servers=192.0.2.53`. The router list and site groups are the inventory. **Check** shows what would change and writes nothing. **Run** sets only the values that differ, after saving `/export` for each router. Routers are done in batches, and a failure stops the next batch. The service account is a RADIUS user. Its password is encrypted in the data file and is not shown after you save it. Only the signed-in admin can run a task. More than one router asks for confirmation. Results are on the run page and in History. API-SSL (port 8729) is required unless that router's form allows the plaintext API on port 8728.
 - **Backups.** A nightly `/export` of every enabled router, with a retention period you set. Diff two saved versions. A change Easy Radius did not make is called out in History.
 - **Compliance.** Pass or fail for telnet, ftp, www, the default admin, NTP, a restricted api-ssl, plaintext API, and RADIUS login. **Fix ticked routers** uses the automation account.
+- **Firmware.** Shows RouterOS version, model, and architecture after a refresh. Flags a router that is older than the latest stable release (fetched from MikroTik, or typed in). Upgrade saves `/export` first, then installs the stable channel in batches and stops if one fails.
+- **Inventory.** Groups routers by site group and shows model, serial, version, uptime, and licence level. Download the same table as CSV.
 
 Third-party licences are listed in [LICENSES.md](LICENSES.md).
 
