@@ -181,6 +181,37 @@ def score(checks: list[dict]) -> tuple[int, int]:
     return passed, len(checks)
 
 
+def router_compliant(router: dict) -> bool:
+    """A router passes only when every check passed and the read did not fail."""
+    if router.get("error"):
+        return False
+    try:
+        total = int(router.get("total") or 0)
+        passed = int(router.get("passed") or 0)
+    except (TypeError, ValueError):
+        return False
+    return total > 0 and passed == total
+
+
+def present_report(report: dict | None) -> dict | None:
+    """Failed routers first. Each row records whether that router is fully compliant."""
+    if not isinstance(report, dict):
+        return None
+    indexed = list(enumerate(report.get("routers") or []))
+    indexed.sort(key=lambda item: (0 if not router_compliant(item[1]) else 1, item[0]))
+    routers = []
+    for _index, router in indexed:
+        shown = dict(router)
+        shown["compliant"] = router_compliant(router)
+        routers.append(shown)
+    return {
+        **report,
+        "routers": routers,
+        "compliant": sum(1 for router in routers if router["compliant"]),
+        "router_count": len(routers),
+    }
+
+
 def fix_template(server_address: str) -> Template:
     steps = [
         Step("/ip/service", {"disabled": "yes"}, {"name": "telnet"}),

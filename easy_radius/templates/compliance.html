@@ -11,29 +11,39 @@
     <button type="submit">Check now</button>
   </form>
   {% if report %}
-  <p class="help">Last check {{ report.at }}</p>
+  <p class="compliance-summary">{{ report.compliant }} of {{ report.router_count }} routers compliant.</p>
+  <p class="help">Last check {{ report.at }}. Failed routers are listed first. Open a row to see its checks.</p>
   <form method="post" action="{{ url_for('compliance_fix') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     {% for router in report.routers %}
-    <h2 class="section">{{ router.site_name }} <span class="help">{{ router.passed }}/{{ router.total }}</span></h2>
-    {% if router.error %}<p class="error">{{ router.error }}</p>{% endif %}
-    {% if router.checks %}
-    <table>
-      <thead><tr><th>Check</th><th>Result</th><th>Detail</th></tr></thead>
-      <tbody>
-        {% for check in router.checks %}
-        <tr>
-          <td>{{ check.title }}</td>
-          <td><span class="status {{ 'up' if check.passed else 'down' }}">{{ 'Pass' if check.passed else 'Fail' }}</span></td>
-          <td>{{ check.detail }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% if router.passed < router.total %}
-    <label class="choice"><input type="checkbox" name="router_ids" value="{{ router.id }}"> Fix {{ router.site_name }}</label>
-    {% endif %}
-    {% endif %}
+    <details class="router-row">
+      <summary>
+        <span class="router-name">{{ router.site_name }}</span>
+        <span>{{ router.ip }}</span>
+        <span class="router-score">{{ router.passed }}/{{ router.total }}</span>
+        <span class="status {{ 'up' if router.compliant else 'down' }}">{{ 'Pass' if router.compliant else 'Fail' }}</span>
+      </summary>
+      <div class="router-body">
+        {% if router.error %}<p class="error">{{ router.error }}</p>{% endif %}
+        {% if router.checks %}
+        <table>
+          <thead><tr><th>Check</th><th>Result</th><th>Detail</th></tr></thead>
+          <tbody>
+            {% for check in router.checks %}
+            <tr>
+              <td>{{ check.title }}</td>
+              <td><span class="status {{ 'up' if check.passed else 'down' }}">{{ 'Pass' if check.passed else 'Fail' }}</span></td>
+              <td>{{ check.detail }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% if not router.compliant %}
+        <label class="choice"><input type="checkbox" name="router_ids" value="{{ router.id }}"> Fix {{ router.site_name }}</label>
+        {% endif %}
+        {% endif %}
+      </div>
+    </details>
     {% endfor %}
     <label class="choice"><input type="checkbox" name="confirm_many" value="yes"> I confirm a fix on every ticked router.</label>
     <button type="submit">Fix ticked routers</button>
