@@ -106,11 +106,26 @@ def test_compliance_score_and_fix_steps():
     checks = evaluate(Router())
     passed, total = score(checks)
     assert total == 8
-    assert passed == 1  # ftp is already off
+    assert passed == 1  # ftp is already off; plaintext API is enabled with no address
+    api = next(check for check in checks if check["id"] == "api")
+    assert api["passed"] is False
+    assert api["detail"] == "enabled, open to any address"
     template = fix_template("192.0.2.1")
     paths = [(step.path, step.where, step.values) for step in template.steps]
     assert ("/ip/service", {"name": "telnet"}, {"disabled": "yes"}) in paths
+    assert not any(step.where.get("name") == "api" for step in template.steps)
     assert any(step.where.get("name") == "api-ssl" and step.values["address"] == "192.0.2.1/32" for step in template.steps)
+
+
+def test_plaintext_api_passes_when_disabled_or_limited_to_addresses():
+    from easy_radius.compliance import _plaintext_api
+
+    assert _plaintext_api({"name": "api", "disabled": "true", "address": ""}) == (True, "disabled")
+    assert _plaintext_api(None) == (True, "disabled")
+    limited = _plaintext_api({"name": "api", "disabled": "false", "address": "192.0.2.10/32,198.51.100.5/32"})
+    assert limited == (True, "enabled, restricted to 192.0.2.10/32,198.51.100.5/32")
+    assert _plaintext_api({"name": "api", "disabled": "no", "address": "0.0.0.0/0"}) == (False, "enabled, open to any address")
+    assert _plaintext_api({"name": "api", "disabled": "false", "address": ""}) == (False, "enabled, open to any address")
 
 
 def test_backup_page_requires_login_and_schedule_saves(tmp_path):

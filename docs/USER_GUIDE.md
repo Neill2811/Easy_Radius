@@ -362,8 +362,8 @@ API-SSL on port 8729 is the only API port used, unless you edit the router and t
 ## Compliance
 
 1. Open **Compliance** and click **Check now**.
-2. Each router gets a pass count. The checks are: telnet off, ftp off, www off, default admin removed or disabled, NTP client enabled with a server, api-ssl limited to an address, plaintext API off, RADIUS login on.
-3. Tick the routers you want to repair and confirm if there is more than one. **Fix ticked routers** turns those services off, disables a local user named admin, turns RADIUS login on, and, if you saved **This server's address**, limits api-ssl to that address. It does not invent an NTP server. Set that with the NTP task if the check still fails.
+2. Each router gets a pass count. The checks are: telnet off, ftp off, www off, default admin removed or disabled, NTP client enabled with a server, api-ssl limited to an address, plaintext API off or limited to specific addresses, RADIUS login on. Plaintext API (port 8728) passes when it is disabled. It also passes when it is enabled and the address list is a real set of hosts, and the detail says `enabled, restricted to` those addresses. It fails only when it is enabled with no address limit, or with `0.0.0.0/0`. The detail then says `enabled, open to any address`.
+3. Tick the routers you want to repair and confirm if there is more than one. **Fix ticked routers** turns telnet, ftp, and www off, disables a local user named admin, turns RADIUS login on, and, if you saved **This server's address**, limits api-ssl to that address. It does not turn the plaintext API off, and it does not invent an NTP server. Set that with the NTP task if the check still fails.
 4. The fix is an automation run, so it saves an export first and shows up in History.
 
 ## Firmware
