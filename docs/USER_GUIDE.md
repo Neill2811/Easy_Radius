@@ -349,6 +349,23 @@ On the Automation page:
 
 The service-account password is not written into a task, a run, or History.
 
+API-SSL on port 8729 is the only API port used, unless you edit the router and tick **Allow plaintext API on port 8728**. Leave that off.
+
+## Config backups
+
+1. Open **Backups**.
+2. Leave nightly backups on, or set the UTC hour and how many days to keep. Click **Save schedule**.
+3. **Backup now** saves `/export` for every enabled router, using the automation service account. Click **Apply** first so that account exists in FreeRADIUS.
+4. **Diff** compares two saved versions. The date line at the top of an export is ignored, so a backup that only differs by that clock line is not a change.
+5. If the configuration changed and Easy Radius did not run a task or restore on that router in between, History says the change happened outside Easy Radius.
+
+## Compliance
+
+1. Open **Compliance** and click **Check now**.
+2. Each router gets a pass count. The checks are: telnet off, ftp off, www off, default admin removed or disabled, NTP client enabled with a server, api-ssl limited to an address, plaintext API off, RADIUS login on.
+3. Tick the routers you want to repair and confirm if there is more than one. **Fix ticked routers** turns those services off, disables a local user named admin, turns RADIUS login on, and, if you saved **This server's address**, limits api-ssl to that address. It does not invent an NTP server. Set that with the NTP task if the check still fails.
+4. The fix is an automation run, so it saves an export first and shows up in History.
+
 ## Monitoring
 
 1. Open **Monitoring**.
