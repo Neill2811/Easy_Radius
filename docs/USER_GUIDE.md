@@ -348,3 +348,20 @@ On the Automation page:
 10. The result for each router (ok, changed, failed, or skipped) is on the run page and under **History**, with your admin name on the row.
 
 The service-account password is not written into a task, a run, or History.
+
+## Firmware
+
+1. Open **Firmware**.
+2. Leave the version box blank and click **Save or fetch** to read the latest stable RouterOS 7 version from MikroTik. If this server cannot reach MikroTik, type the version yourself, for example `7.24.5`.
+3. Click **Refresh from routers**. The page shows model, architecture, and the installed version. **outdated** means it is older than the latest stable version you saved.
+4. Tick the routers to upgrade. Set how many to do at a time. If more than one is ticked, confirm it.
+5. **Upgrade ticked routers** saves `/export` first, switches the router to the stable channel, and installs. The router reboots. If one fails, later routers are not started. The row in History names who started it.
+
+The automation service account must already be saved, and you must have clicked **Apply**, or the refresh cannot log in.
+
+## Inventory
+
+1. Open **Inventory**.
+2. Click **Refresh from routers** if the model and serial are empty.
+3. Each block is one site group. A router with two tags is listed in both. Routers with no tag are under Ungrouped.
+4. **Download CSV** saves site, address, groups, model, serial, version, architecture, uptime, and licence level.
