@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Backups · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Config backups</h1>
+</div>
+<div class="card">
+  <p class="help">Each night Easy Radius saves <code>/export</code> from every enabled router, using the automation service account. Secrets stay hidden. A change that Easy Radius did not make is listed below and in History.</p>
+  <form method="post" action="{{ url_for('config_backup_settings') }}" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="choice"><input type="checkbox" name="enabled" value="yes" {% if schedule.enabled %}checked{% endif %}> Nightly backups</label>
+    <label for="hour">Hour UTC</label>
+    <input id="hour" name="hour" type="number" min="0" max="23" value="{{ schedule.hour }}">
+    <label for="retention_days">Keep days</label>
+    <input id="retention_days" name="retention_days" type="number" min="1" max="365" value="{{ schedule.retention_days }}">
+    <button class="secondary" type="submit">Save schedule</button>
+  </form>
+  <form method="post" action="{{ url_for('config_backup_run') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Backup now</button>
+  </form>
+  {% if schedule.last_run %}<p class="help">Last run {{ schedule.last_run }}</p>{% endif %}
+</div>
+{% if alerts %}
+<div class="card">
+  <h2>Changes outside Easy Radius</h2>
+  <ul>
+    {% for alert in alerts %}
+    <li>{{ alert.at }} — {{ alert.site_name }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+<div class="card">
+  <h2 class="section">Routers</h2>
+  {% if routers %}
+  <table>
+    <thead><tr><th>Site</th><th>Latest</th><th></th></tr></thead>
+    <tbody>
+      {% for router in routers %}
+      <tr>
+        <td data-label="Site">{{ router.site_name }}</td>
+        <td data-label="Latest">{{ router.versions[0] if router.versions else "none" }}</td>
+        <td data-label="Actions">{% if router.versions|length > 1 %}<a href="{{ url_for('config_backup_diff', router_id=router.id) }}">Diff</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No routers yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

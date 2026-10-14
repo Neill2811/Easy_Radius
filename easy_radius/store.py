@@ -106,6 +106,7 @@ def load_state(data_dir: Path) -> dict:
     for item in state["routers"]:
         item["enabled"] = bool(item.get("enabled", True))
         item["tags"] = _name_list(item.get("tags"))
+        item["api_plaintext"] = bool(item.get("api_plaintext", False))
     for item in state["users"]:
         item["enabled"] = bool(item.get("enabled", True))
         item["access"] = "routers" if item.get("access") == "routers" else "all"
