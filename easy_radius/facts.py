@@ -12,8 +12,29 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+CHANNELS = ("stable", "long-term", "testing", "development")
 LATEST_URL = "https://upgrade.mikrotik.com/routeros/NEWESTa7.stable"
 _VERSION = re.compile(r"^\d+(?:\.\d+)+")
+
+
+def latest_url(channel: str) -> str:
+    if channel not in CHANNELS:
+        raise ValueError("Unknown firmware channel")
+    if channel == "stable":
+        return LATEST_URL
+    return f"https://upgrade.mikrotik.com/routeros/NEWESTa7.{channel}"
+
+
+def latest_by_channel(state: dict) -> dict[str, str]:
+    """Per-channel latest versions. A legacy single string is the stable version."""
+    found = {name: "" for name in CHANNELS}
+    raw = state.get("firmware_latest")
+    if isinstance(raw, str):
+        found["stable"] = raw.strip()
+    elif isinstance(raw, dict):
+        for name in CHANNELS:
+            found[name] = str(raw.get(name) or "").strip()
+    return found
 
 
 def parse_version(text: str | None) -> tuple[int, ...] | None:
@@ -42,15 +63,19 @@ def outdated(installed: str | None, latest: str | None) -> bool:
     return left + (0,) * (width - len(left)) < right + (0,) * (width - len(right))
 
 
-def fetch_latest_stable(opener=None) -> str:
+def fetch_latest(channel: str, opener=None) -> str:
     open_url = opener or urllib.request.urlopen
-    with open_url(LATEST_URL, timeout=10) as response:
+    with open_url(latest_url(channel), timeout=10) as response:
         text = response.read(200).decode("utf-8", "replace")
     parts = text.split()
     version = parts[0].strip() if parts else ""
     if not _VERSION.match(version):
         raise ValueError("Upstream version was not recognised")
     return version
+
+
+def fetch_latest_stable(opener=None) -> str:
+    return fetch_latest("stable", opener)
 
 
 def _open(connector, router, username, password):
@@ -80,6 +105,12 @@ def read_facts(session) -> dict:
             licence = session.get("/system/license")
         except Exception:
             licence = {}
+    channel = ""
+    if hasattr(session, "get"):
+        try:
+            channel = str(session.get("/system/package/update").get("channel") or "").strip()
+        except Exception:
+            channel = ""
     total = _int(resource.get("total-memory"))
     free = _int(resource.get("free-memory"))
     used = ""
@@ -87,6 +118,7 @@ def read_facts(session) -> dict:
         used = str(round((total - free) * 100 / total))
     return {
         "version": str(resource.get("version") or ""),
+        "channel": channel,
         "model": str(board.get("model") or resource.get("board-name") or ""),
         "arch": str(resource.get("architecture-name") or ""),
         "uptime": str(resource.get("uptime") or ""),
@@ -128,13 +160,25 @@ def save_upgrade_export(data_dir: Path, router_id: str, text: str, when: datetim
     os.chmod(path, 0o600)
 
 
-def upgrade_router(router, connector, username, password, data_dir: Path, when: datetime | None = None) -> dict:
+def upgrade_router(
+    router,
+    connector,
+    username,
+    password,
+    data_dir: Path,
+    when: datetime | None = None,
+    channel: str | None = None,
+) -> dict:
     moment = when or datetime.now(timezone.utc)
     session = _open(connector, router, username, password)
     try:
         text = session.export()
         save_upgrade_export(data_dir, router["id"], text, moment)
-        session.call("/system/package/update", "set", channel="stable")
+        chosen = (channel or "").strip()
+        if chosen:
+            if chosen not in CHANNELS:
+                return {"status": "failed", "detail": "Unknown firmware channel."}
+            session.call("/system/package/update", "set", channel=chosen)
         session.call("/system/package/update", "check-for-updates")
         try:
             session.call("/system/package/update", "install")
@@ -154,7 +198,7 @@ def upgrade_router(router, connector, username, password, data_dir: Path, when: 
     return {"status": "started", "detail": "Upgrade installed. The router will reboot."}
 
 
-def upgrade_many(routers, connector, username, password, data_dir: Path, batch: int = 1) -> list[dict]:
+def upgrade_many(routers, connector, username, password, data_dir: Path, batch: int = 1, channel: str | None = None) -> list[dict]:
     results = []
     stopped = False
     size = max(1, min(int(batch or 1), 50))
@@ -166,7 +210,7 @@ def upgrade_many(routers, connector, username, password, data_dir: Path, batch: 
                 results.append(_skipped(router))
                 continue
             try:
-                outcome = upgrade_router(router, connector, username, password, data_dir)
+                outcome = upgrade_router(router, connector, username, password, data_dir, channel=channel)
             except Exception as exc:
                 outcome = {"status": "failed", "detail": _scrub(str(exc), password)}
             results.append({"id": router["id"], "site_name": router["site_name"], **outcome})

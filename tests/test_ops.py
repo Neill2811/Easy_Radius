@@ -106,7 +106,11 @@ def test_compliance_score_and_fix_steps():
     checks = evaluate(Router())
     passed, total = score(checks)
     assert total == 8
-    assert passed == 1  # ftp is already off; plaintext API is enabled with no address
+    assert passed == 0  # ftp disabled is a failure; plaintext API is open
+    ftp = next(check for check in checks if check["id"] == "ftp")
+    assert ftp["title"] == "FTP is on and restricted"
+    assert ftp["passed"] is False
+    assert ftp["detail"] == "disabled"
     api = next(check for check in checks if check["id"] == "api")
     assert api["passed"] is False
     assert api["detail"] == "enabled, open to any address"
@@ -114,7 +118,21 @@ def test_compliance_score_and_fix_steps():
     paths = [(step.path, step.where, step.values) for step in template.steps]
     assert ("/ip/service", {"name": "telnet"}, {"disabled": "yes"}) in paths
     assert not any(step.where.get("name") == "api" for step in template.steps)
+    assert not any(step.where.get("name") == "ftp" for step in template.steps)
     assert any(step.where.get("name") == "api-ssl" and step.values["address"] == "192.0.2.1/32" for step in template.steps)
+
+
+def test_ftp_passes_only_when_enabled_and_restricted():
+    from easy_radius.compliance import _ftp
+
+    assert _ftp({"name": "ftp", "disabled": "true", "address": "192.0.2.10/32"}) == (False, "disabled")
+    assert _ftp(None) == (False, "disabled")
+    limited = _ftp({"name": "ftp", "disabled": "false", "address": "192.0.2.10/32,198.51.100.5/32"})
+    assert limited == (True, "enabled, restricted to 192.0.2.10/32,198.51.100.5/32")
+    assert _ftp({"name": "ftp", "disabled": "no", "address": "0.0.0.0/0"}) == (False, "enabled, open to any address")
+    assert _ftp({"name": "ftp", "disabled": "false", "address": ""}) == (False, "enabled, open to any address")
+    assert _ftp({"name": "ftp", "disabled": "no", "address": "::/0"}) == (False, "enabled, open to any address")
+    assert not any(step.where.get("name") == "ftp" for step in fix_template("").steps)
 
 
 def test_plaintext_api_passes_when_disabled_or_limited_to_addresses():
@@ -150,3 +168,87 @@ def test_backup_page_requires_login_and_schedule_saves(tmp_path):
     assert saved["hour"] == 4
     assert saved["retention_days"] == 14
     assert any(event["actor"] == "neill" for event in load_state(data)["audit"])
+
+
+def test_backup_failure_is_explained_and_kept(tmp_path):
+    from easy_radius.config_backups import complete_backup, explain_backup_error
+    from easy_radius.ops_web import _maybe_backup
+
+    assert explain_backup_error("SSL handshake failure") == "api-ssl has no certificate"
+    assert explain_backup_error("connection refused") == "connection refused"
+    assert explain_backup_error("timed out") == "timed out"
+    assert (
+        explain_backup_error(f"invalid user name or password ({PASSWORD})", PASSWORD)
+        == "service account rejected; check Apply/permissions"
+    )
+    assert PASSWORD not in explain_backup_error(f"invalid user name or password ({PASSWORD})", PASSWORD)
+
+    data = tmp_path / "data"
+    prepare_state(data, admin_password=PASSWORD)
+    state = load_state(data)
+    state["routers"] = [
+        {"id": "r1", "site_name": "ExampleSite", "ip": "192.0.2.10", "enabled": True, "api_plaintext": False}
+    ]
+    from easy_radius.automation import automation_key, encrypt_secret
+
+    key = automation_key(state)
+    state["automation_account"] = {
+        "user_id": "u1",
+        "username": "radius-auto",
+        "password_enc": encrypt_secret(key, PASSWORD),
+    }
+    state["backup_schedule"] = {"enabled": True, "hour": 0, "retention_days": 30, "last_run": ""}
+    save_state(data, state)
+
+    def connector(host, username, password, allow_plaintext=False):
+        raise OSError(f"SSL: handshake failure ({password})")
+
+    app = create_app(data_dir=data, runner=lambda args, timeout=120: None)
+    app.config["TESTING"] = True
+    app.config["ROUTER_CONNECT"] = connector
+    client = app.test_client()
+    page = client.get("/login")
+    token = re.search(r'name="csrf_token" value="([^"]+)"', page.get_data(as_text=True)).group(1)
+    client.post("/login", data={"username": "neill", "password": PASSWORD, "csrf_token": token})
+    page = client.get("/backups")
+    token = re.search(r'name="csrf_token" value="([^"]+)"', page.get_data(as_text=True)).group(1)
+    done = client.post("/backups/run", data={"csrf_token": token}, follow_redirects=True)
+    body = done.get_data(as_text=True)
+    assert "Some config backups failed." in body
+    assert "api-ssl has no certificate" in body
+    assert "Last backup:" in body
+    assert "failed:" in body
+    assert PASSWORD not in body
+    saved = load_state(data)
+    assert saved["last_backup_run"]["routers"][0]["status"] == "failed"
+    assert any("Backup failed for ExampleSite" in event["detail"] for event in saved["audit"])
+    assert PASSWORD not in " ".join(event["detail"] for event in saved["audit"])
+    history = client.get("/history")
+    assert "Backup failed for ExampleSite" in history.get_data(as_text=True)
+    assert PASSWORD not in history.get_data(as_text=True)
+
+    state = load_state(data)
+    state["automation_account"] = {}
+    state["backup_schedule"]["last_run"] = ""
+    save_state(data, state)
+    _maybe_backup(app)
+    scheduled = load_state(data)
+    assert scheduled["last_backup_run"]["error"]
+    assert scheduled["backup_schedule"]["last_run"]
+    assert any(event["actor"] == "scheduler" and "Backup failed" in event["detail"] for event in scheduled["audit"])
+
+    state = load_state(data)
+    state["automation_account"] = {
+        "user_id": "u1",
+        "username": "radius-auto",
+        "password_enc": encrypt_secret(automation_key(state), PASSWORD),
+    }
+    state["backup_schedule"]["last_run"] = ""
+    save_state(data, state)
+
+    def refused(host, username, password, allow_plaintext=False):
+        raise OSError("connection refused")
+
+    app.config["ROUTER_CONNECT"] = refused
+    summary = complete_backup(load_state(data), data, refused, actor="scheduler")
+    assert summary["routers"][0]["detail"] == "connection refused"

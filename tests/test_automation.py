@@ -349,3 +349,193 @@ def test_failure_stops_the_next_batch(tmp_path):
     assert any(event[0] == "set" for event in fakes["192.0.2.10"].events)
     raw = json.dumps(load_state(data)["audit"])
     assert PASSWORD not in raw
+
+
+def test_routeros_commands_are_checked_and_run_like_yaml(tmp_path):
+    from easy_radius.automation import _apply_one
+    from easy_radius.routeros_cli import CommandSyntaxError, parse_commands
+
+    text = "\n".join(
+        [
+            "/ip dns set servers=192.0.2.53",
+            "/system ntp client set enabled=yes",
+            "/ip service set ftp address=192.0.2.0/24",
+            '/ip service set [find where name="ftp"] address=192.0.2.10/32',
+            "/ip service disable telnet",
+            "/ip service enable api-ssl",
+            "/ip firewall filter add chain=input action=accept",
+            "/ip firewall filter remove [find comment=example]",
+            "/system identity set name={{ identity_name }}",
+        ]
+    )
+    commands, warnings = parse_commands(text)
+    assert warnings == []
+    assert [(item.path, item.verb) for item in commands[:3]] == [
+        ("/ip/dns", "set"),
+        ("/system/ntp/client", "set"),
+        ("/ip/service", "set"),
+    ]
+    assert commands[2].where == {"name": "ftp"}
+    assert commands[2].values["address"] == "192.0.2.0/24"
+    assert commands[3].where == {"name": "ftp"}
+    assert commands[5].verb == "enable" and commands[5].where == {"name": "api-ssl"}
+    assert commands[8].values["name"] == "{{ identity_name }}"
+    parsed = parse_template(text)
+    assert parsed.steps[6].verb == "add"
+    assert parsed.steps[6].path == "/ip/firewall/filter"
+
+    try:
+        parse_commands(
+            "/ip dns set servers=192.0.2.53\n"
+            "not a command\n"
+            "/ip service set [find name=ftp\n"
+            '/ip dns set servers="192.0.2.53\n'
+        )
+    except CommandSyntaxError as exc:
+        message = str(exc)
+        assert "Line 2:" in message
+        assert "Line 3: brackets were not closed" in message
+        assert "Line 4: a quoted value was not closed" in message
+    else:
+        raise AssertionError("invalid commands were accepted")
+    try:
+        parse_commands("/ip service set where name=ftp address=192.0.2.0/24\n")
+    except CommandSyntaxError as exc:
+        assert "find where" in str(exc)
+    else:
+        raise AssertionError("a bare where was accepted")
+
+    _unknown, notes = parse_commands("/made/up set foo=1\n")
+    assert any("unknown path /made/up" in note for note in notes)
+
+    class Rows:
+        def __init__(self):
+            self.rows_data = {
+                "/ip/service": [
+                    {"name": "telnet", "disabled": "false", ".id": "*2"},
+                    {"name": "api-ssl", "disabled": "true", ".id": "*4"},
+                ],
+                "/ip/firewall/filter": [{"comment": "example", ".id": "*3"}],
+            }
+            self.events = []
+
+        def rows(self, path):
+            return [dict(row) for row in self.rows_data.get(path, [])]
+
+        def get(self, path):
+            found = self.rows(path)
+            row = dict(found[0]) if found else {}
+            row.pop(".id", None)
+            return {str(key): str(value) for key, value in row.items()}
+
+        def set_matching(self, path, where, values):
+            self.events.append(("set", path, dict(where), dict(values)))
+            for row in self.rows_data.get(path, []):
+                if all(str(row.get(key)) == value for key, value in where.items()):
+                    row.update(values)
+
+        def add(self, path, values):
+            self.events.append(("add", path, dict(values)))
+            self.rows_data.setdefault(path, []).append(dict(values))
+
+        def remove(self, path, where):
+            self.events.append(("remove", path, dict(where)))
+            self.rows_data[path] = [
+                row
+                for row in self.rows_data.get(path, [])
+                if not all(str(row.get(key)) == value for key, value in where.items())
+            ]
+
+        def export(self):
+            return "# export\n"
+
+        def close(self):
+            pass
+
+    router = {"id": "r1", "site_name": "ExampleSite", "ip": "192.0.2.10"}
+    body = "\n".join(
+        [
+            "/ip service disable telnet",
+            "/ip firewall filter add chain=input action=accept",
+            "/ip firewall filter remove [find comment=example]",
+        ]
+    )
+    session = Rows()
+    dry = _apply_one(session, parse_template(body), {}, True, tmp_path, "20260101T000000Z", router)
+    assert dry["status"] == "changed"
+    assert "Dry run: nothing was written." in dry["output"]
+    assert session.events == []
+    ran = _apply_one(session, parse_template(body), {}, False, tmp_path, "20260101T000000Z", router)
+    assert ran["status"] == "changed"
+    assert ("set", "/ip/service", {"name": "telnet"}, {"disabled": "yes"}) in session.events
+    assert ("add", "/ip/firewall/filter", {"chain": "input", "action": "accept"}) in session.events
+    assert ("remove", "/ip/firewall/filter", {"comment": "example"}) in session.events
+    again = _apply_one(session, parse_template(body), {}, False, tmp_path, "20260101T000001Z", router)
+    assert again["status"] == "ok"
+
+    fakes = {
+        "192.0.2.10": FakeRouter({"/ip/dns": {"servers": "192.0.2.1", "allow-remote-requests": "false"}}),
+    }
+    _app_obj, client, data = _app(tmp_path / "web", fakes)
+    token = _save_account(client, data)
+    page = client.get("/automation/tasks/new")
+    token = _csrf(page.get_data(as_text=True))
+    rejected = client.post(
+        "/automation/tasks/new",
+        data={"csrf_token": token, "name": "Broken", "commands": "/ip dns print\n", "body": ""},
+    )
+    assert rejected.status_code == 400
+    assert "Line 1:" in rejected.get_data(as_text=True)
+    assert not any(task["name"] == "Broken" for task in load_state(data)["tasks"])
+    token = _csrf(rejected.get_data(as_text=True))
+    both = client.post(
+        "/automation/tasks/new",
+        data={
+            "csrf_token": token,
+            "name": "Both",
+            "commands": "/ip dns set servers=192.0.2.53\n",
+            "body": "name: Both\nsteps:\n  - path: /ip/dns\n    set:\n      servers: 192.0.2.1\n",
+        },
+    )
+    assert both.status_code == 400
+    assert "not both" in both.get_data(as_text=True)
+    token = _csrf(both.get_data(as_text=True))
+    warned = client.post(
+        "/automation/tasks/new",
+        data={"csrf_token": token, "name": "Odd path", "commands": "/made/up set foo=1\n", "body": ""},
+        follow_redirects=True,
+    )
+    assert "unknown path /made/up" in warned.get_data(as_text=True)
+    token = _csrf(warned.get_data(as_text=True))
+    created = client.post(
+        "/automation/tasks/new",
+        data={
+            "csrf_token": token,
+            "name": "Set DNS from commands",
+            "commands": "/ip dns set servers=192.0.2.53\n",
+            "body": "",
+        },
+        follow_redirects=True,
+    )
+    assert "Task saved" in created.get_data(as_text=True)
+    state = load_state(data)
+    task = next(item for item in state["tasks"] if item["name"] == "Set DNS from commands")
+    edit = client.get(f"/automation/tasks/{task['id']}/edit")
+    edit_body = edit.get_data(as_text=True)
+    assert "/ip dns set servers=192.0.2.53" in edit_body
+    token = _csrf(created.get_data(as_text=True))
+    checked = client.post(
+        f"/automation/tasks/{task['id']}/run",
+        data={"csrf_token": token, "router_ids": "r1", "mode": "check", "batch": "1"},
+        follow_redirects=True,
+    )
+    assert "Dry run: nothing was written." in checked.get_data(as_text=True)
+    assert [event for event in fakes["192.0.2.10"].events if event[0] != "close"] == [("get", "/ip/dns")]
+    token = _csrf(checked.get_data(as_text=True))
+    ran_page = client.post(
+        f"/automation/tasks/{task['id']}/run",
+        data={"csrf_token": token, "router_ids": "r1", "mode": "run", "batch": "1"},
+        follow_redirects=True,
+    )
+    assert "changed" in ran_page.get_data(as_text=True)
+    assert ("set", "/ip/dns", {"servers": "192.0.2.53"}) in fakes["192.0.2.10"].events

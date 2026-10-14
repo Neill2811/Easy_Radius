@@ -37,7 +37,7 @@
 </div>
 <div class="card">
   <h2 class="section">Tasks</h2>
-  <p class="help">A task is a YAML or JSON list of RouterOS paths to set, with variables such as <code>{{ '{{ dns_servers }}' }}</code>. The router list and site groups on this page are the inventory. There is no separate inventory file.</p>
+  <p class="help">A task is RouterOS commands, one per line, or a YAML or JSON list of paths to set. On <strong>New task</strong>, paste commands such as <code>/ip dns set servers=192.0.2.53</code>. Variables such as <code>{{ '{{ dns_servers }}' }}</code> still work in YAML. The router list and site groups on this page are the inventory. There is no separate inventory file.</p>
   <p><a class="button" href="{{ url_for('automation_task_new') }}">New task</a></p>
   <form method="post" action="{{ url_for('automation_task_upload') }}" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

@@ -13,11 +13,11 @@ from easy_radius.automation import AutomationError, launch_run, new_run_id, save
 from easy_radius.compliance import evaluate, fix_template, score
 from easy_radius.config_backups import (
     backup_due,
+    complete_backup,
     default_schedule,
     diff_versions,
     list_versions,
     read_version,
-    run_backups,
 )
 from easy_radius.store import load_state, save_state
 
@@ -32,15 +32,27 @@ def register_ops(app) -> None:
     def config_backups():
         state = load_state(app.config["DATA_DIR"])
         schedule = {**default_schedule(), **(state.get("backup_schedule") or {})}
+        last = state.get("last_backup_run") or {}
+        by_id = {row.get("id"): row for row in last.get("routers") or []}
         routers = []
         for router in state.get("routers") or []:
             versions = list_versions(app.config["DATA_DIR"], router["id"])
-            routers.append({**router, "versions": versions[:20]})
+            previous = by_id.get(router["id"]) or {}
+            routers.append(
+                {
+                    **router,
+                    "versions": versions[:20],
+                    "last_at": last.get("at") if previous else "",
+                    "last_status": previous.get("status") or "",
+                    "last_detail": previous.get("detail") or "",
+                }
+            )
         return render_template(
             "backups.html",
             schedule=schedule,
             routers=routers,
             alerts=state.get("change_alerts") or [],
+            backup_run=last,
         )
 
     @app.post("/backups/settings")
@@ -64,17 +76,13 @@ def register_ops(app) -> None:
     def config_backup_run():
         data_dir = app.config["DATA_DIR"]
         state = load_state(data_dir)
-        connector = _connector(app)
-        try:
-            run_backups(state, data_dir, connector, actor="neill")
-        except AutomationError as exc:
-            flash(str(exc), "error")
-            return redirect(url_for("config_backups"))
-        schedule = {**default_schedule(), **(state.get("backup_schedule") or {})}
-        schedule["last_run"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        state["backup_schedule"] = schedule
+        summary = complete_backup(state, data_dir, _connector(app), actor="neill")
         save_state(data_dir, state)
-        flash("Config backups finished.", "ok")
+        failed = summary.get("error") or any(row.get("status") == "failed" for row in summary.get("routers") or [])
+        if failed:
+            flash("Some config backups failed.", "error")
+        else:
+            flash("Config backups finished.", "ok")
         return redirect(url_for("config_backups"))
 
     @app.get("/backups/<router_id>")
@@ -259,11 +267,5 @@ def _maybe_backup(app) -> None:
         now = datetime.now(timezone.utc)
         if not backup_due(schedule, now):
             return
-        connector = _connector(app)
-        try:
-            run_backups(state, data_dir, connector, actor="scheduler", now=now)
-        except AutomationError:
-            return
-        schedule["last_run"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-        state["backup_schedule"] = schedule
+        complete_backup(state, data_dir, _connector(app), actor="scheduler", now=now)
         save_state(data_dir, state)

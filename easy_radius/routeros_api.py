@@ -68,6 +68,19 @@ class ApiSession:
                 payload[".id"] = row[".id"]
             node.update(**payload)
 
+    def add(self, path: str, values: dict[str, str]) -> None:
+        parts = [part for part in path.strip("/").split("/") if part]
+        self.api.path(*parts).add(**values)
+
+    def remove(self, path: str, where: dict[str, str]) -> None:
+        parts = [part for part in path.strip("/").split("/") if part]
+        node = self.api.path(*parts)
+        matched = [row for row in node if _matches(row, where)]
+        ids = [str(row[".id"]) for row in matched if row.get(".id")]
+        if not ids:
+            raise AutomationError(f"No row on {path} matched {where}")
+        node.remove(*ids)
+
     def export(self) -> str:
         # show-sensitive stays off so the saved export does not keep router secrets.
         return self.api.config().export(show_sensitive=False)

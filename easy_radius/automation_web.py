@@ -102,7 +102,7 @@ def register_automation(app) -> None:
     @app.get("/automation/tasks/new")
     def automation_task_new():
         _ready_state(app)
-        return render_template("task_form.html", task={"id": "", "name": "", "body": ""}, error=None, title="New task")
+        return render_template("task_form.html", task={"id": "", "name": "", "body": "", "commands": ""}, error=None, title="New task")
 
     @app.post("/automation/tasks/new")
     def automation_task_create():
@@ -114,7 +114,7 @@ def register_automation(app) -> None:
         task = find_task(state, task_id)
         if task is None:
             abort(404)
-        return render_template("task_form.html", task=task, error=None, title="Edit task")
+        return render_template("task_form.html", task=_form_task(task), error=None, title="Edit task")
 
     @app.post("/automation/tasks/<task_id>/edit")
     def automation_task_update(task_id: str):
@@ -359,34 +359,85 @@ def _ready_state(app):
     return state
 
 
+def _form_task(task: dict) -> dict:
+    shown = dict(task)
+    commands = shown.get("commands") or ""
+    if commands and shown.get("body") == commands:
+        shown["body"] = ""
+    return shown
+
+
 def _save_task(app, task_id: str | None):
     data_dir = app.config["DATA_DIR"]
     state = load_state(data_dir)
     name = request.form.get("name", "").strip()
     body = request.form.get("body", "")
+    commands = request.form.get("commands", "")
     if task_id:
         task = find_task(state, task_id)
         if task is None:
             abort(404)
     else:
         task = None
-    try:
-        parsed = parse_template(body)
-    except AutomationError as exc:
-        posted = {"id": task_id or "", "name": name, "body": body}
-        return render_template("task_form.html", task=posted, error=str(exc), title="Edit task" if task else "New task"), 400
+    posted = {"id": task_id or "", "name": name, "body": body, "commands": commands}
+    title = "Edit task" if task else "New task"
+    if commands.strip() and body.strip():
+        return render_template(
+            "task_form.html",
+            task=posted,
+            error="Use the commands box or the YAML box, not both.",
+            title=title,
+        ), 400
+    warnings: list[str] = []
+    if commands.strip():
+        from easy_radius.routeros_cli import CommandSyntaxError, parse_commands
+
+        try:
+            _parsed_commands, warnings = parse_commands(commands)
+            parsed = parse_template(commands)
+        except (CommandSyntaxError, AutomationError) as exc:
+            return render_template("task_form.html", task=posted, error=str(exc), title=title), 400
+        stored_body = commands
+        stored_commands = commands
+    else:
+        if not body.strip():
+            return render_template(
+                "task_form.html",
+                task=posted,
+                error="Paste RouterOS commands, or a YAML or JSON task.",
+                title=title,
+            ), 400
+        try:
+            parsed = parse_template(body)
+        except AutomationError as exc:
+            return render_template("task_form.html", task=posted, error=str(exc), title=title), 400
+        stored_body = body
+        stored_commands = ""
     if not name:
         name = parsed.name
     if task is None:
         state.setdefault("tasks", []).append(
-            {"id": secrets.token_hex(8), "name": name, "body": body, "builtin": False}
+            {
+                "id": secrets.token_hex(8),
+                "name": name,
+                "body": stored_body,
+                "commands": stored_commands,
+                "builtin": False,
+            }
         )
         record(state, "automation", f"Added task {name}")
-        flash("Task saved.", "ok")
+        flash(_saved_message("Task saved.", warnings), "ok")
     else:
         task["name"] = name
-        task["body"] = body
+        task["body"] = stored_body
+        task["commands"] = stored_commands
         record(state, "automation", f"Updated task {name}")
-        flash("Task updated.", "ok")
+        flash(_saved_message("Task updated.", warnings), "ok")
     save_state(data_dir, state)
     return redirect(url_for("automation"))
+
+
+def _saved_message(prefix: str, warnings: list[str]) -> str:
+    if not warnings:
+        return prefix
+    return prefix + " " + " ".join(warnings)

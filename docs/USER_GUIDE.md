@@ -339,7 +339,7 @@ On the Automation page:
 1. Save a **service account**. This is a RADIUS user Easy Radius uses to log into the API. Create one (group `write` or `full`) or pick an existing user and type the password again. The password is encrypted and is not shown after you save it. You can generate one instead of typing it.
 2. Click **Apply** so FreeRADIUS learns that user. Until you do, the router cannot authenticate the account.
 3. A `read` user can be used for Check, but Run will be refused by the router.
-4. Open a task. The built-in examples set NTP, DNS, identity, and SNMP. Edit the example addresses before you use them. You can also write a task as lines such as `/ip/dns set servers=192.0.2.53 allow-remote-requests=no`, or upload YAML or JSON.
+4. Open a task. The built-in examples set NTP, DNS, identity, and SNMP. Edit the example addresses before you use them. On **New task**, paste plain RouterOS commands in **Commands**, one per line, for example `/ip dns set servers=192.0.2.53`, `/system ntp client set enabled=yes`, or `/ip service set ftp address=192.0.2.0/24`. You can also write YAML or JSON, or upload a file. A command needs a path, then `set`, `add`, `remove`, `enable`, or `disable`, then `name=value` pairs. Name an item directly (`ftp`) or use `[find name=ftp]`. Easy Radius checks each line before saving and shows the line number when a line is not valid. It does not save until every line parses. An unknown path or attribute is kept, and the save message names it. **Check** and **Run** treat a command task the same way as a YAML task.
 5. Click **Run** on the task. Tick routers, or a site group, or both. Disabled routers are left out.
 6. Click **Check** first. It reads the current values and shows what would change. It does not write.
 7. Click **Run** to write only the values that differ. If you selected more than one router, tick the confirmation and accept the question in the browser.
@@ -355,24 +355,25 @@ API-SSL on port 8729 is the only API port used, unless you edit the router and t
 
 1. Open **Backups**.
 2. Leave nightly backups on, or set the UTC hour and how many days to keep. Click **Save schedule**.
-3. **Backup now** saves `/export` for every enabled router, using the automation service account. Click **Apply** first so that account exists in FreeRADIUS.
-4. **Diff** compares two saved versions. The date line at the top of an export is ignored, so a backup that only differs by that clock line is not a change.
-5. If the configuration changed and Easy Radius did not run a task or restore on that router in between, History says the change happened outside Easy Radius.
+3. **Backup now** saves `/export` for every enabled router, using the automation service account. Click **Apply** first so that account exists in FreeRADIUS. The page lists each router as ok, changed, or failed. A failed router shows the reason, and History records it. The nightly run does the same.
+4. A missing api-ssl certificate, a rejected service account, and a refused or timed-out connection are named in that result. The service-account password is not written on the page or in History.
+5. **Diff** compares two saved versions. The date line at the top of an export is ignored, so a backup that only differs by that clock line is not a change.
+6. If the configuration changed and Easy Radius did not run a task or restore on that router in between, History says the change happened outside Easy Radius.
 
 ## Compliance
 
 1. Open **Compliance** and click **Check now**.
-2. Each router gets a pass count. The checks are: telnet off, ftp off, www off, default admin removed or disabled, NTP client enabled with a server, api-ssl limited to an address, plaintext API off or limited to specific addresses, RADIUS login on. Plaintext API (port 8728) passes when it is disabled. It also passes when it is enabled and the address list is a real set of hosts, and the detail says `enabled, restricted to` those addresses. It fails only when it is enabled with no address limit, or with `0.0.0.0/0`. The detail then says `enabled, open to any address`.
-3. Tick the routers you want to repair and confirm if there is more than one. **Fix ticked routers** turns telnet, ftp, and www off, disables a local user named admin, turns RADIUS login on, and, if you saved **This server's address**, limits api-ssl to that address. It does not turn the plaintext API off, and it does not invent an NTP server. Set that with the NTP task if the check still fails.
+2. Each router gets a pass count. The checks are: telnet off, FTP on and restricted, www off, default admin removed or disabled, NTP client enabled with a server, api-ssl limited to an address, plaintext API off or limited to specific addresses, RADIUS login on. FTP passes only when it is enabled and the address list is a real set of hosts. The detail says `enabled, restricted to` those addresses. It fails when FTP is disabled (`disabled`) or enabled with no address limit (`enabled, open to any address`). `0.0.0.0/0` and `::/0` count as no limit. Plaintext API (port 8728) passes when it is disabled. It also passes when it is enabled and the address list is a real set of hosts, and the detail says `enabled, restricted to` those addresses. It fails only when it is enabled with no address limit, or with `0.0.0.0/0`. The detail then says `enabled, open to any address`.
+3. Tick the routers you want to repair and confirm if there is more than one. **Fix ticked routers** turns telnet and www off, disables a local user named admin, turns RADIUS login on, and, if you saved **This server's address**, limits api-ssl to that address. It does not change FTP, because the address list is not known here. It does not turn the plaintext API off, and it does not invent an NTP server. Set NTP with the NTP task if the check still fails. Set the FTP address list on the router, or with a command task, if that check fails.
 4. The fix is an automation run, so it saves an export first and shows up in History.
 
 ## Firmware
 
 1. Open **Firmware**.
-2. Leave the version box blank and click **Save or fetch** to read the latest stable RouterOS 7 version from MikroTik. If this server cannot reach MikroTik, type the version yourself, for example `7.24.5`.
-3. Click **Refresh from routers**. The page shows model, architecture, and the installed version. **outdated** means it is older than the latest stable version you saved.
-4. Tick the routers to upgrade. Set how many to do at a time. If more than one is ticked, confirm it.
-5. **Upgrade ticked routers** saves `/export` first, switches the router to the stable channel, and installs. The router reboots. If one fails, later routers are not started. The row in History names who started it.
+2. Leave a channel box blank and click **Save or fetch** to read the latest RouterOS 7 version for that channel from MikroTik (`stable`, `long-term`, `testing`, or `development`). If this server cannot reach MikroTik, type the version yourself, for example `7.24.5` for stable.
+3. Click **Refresh from routers**. The page shows model, architecture, channel, and the installed version. **outdated** means it is older than the latest version on that same channel. A router with no channel is not marked outdated.
+4. Tick the routers to upgrade. Leave **Change channel** on "Keep each router's channel" unless you mean to move them. Set how many to do at a time. If more than one is ticked, confirm it.
+5. **Upgrade ticked routers** saves `/export` first, then installs on the router's current channel. It does not switch the channel unless you picked one. The router reboots. If one fails, later routers are not started. The row in History names who started it.
 
 The automation service account must already be saved, and you must have clicked **Apply**, or the refresh cannot log in.
 
@@ -381,7 +382,7 @@ The automation service account must already be saved, and you must have clicked 
 1. Open **Inventory**.
 2. Click **Refresh from routers** if the model and serial are empty.
 3. Each block is one site group. A router with two tags is listed in both. Routers with no tag are under Ungrouped.
-4. **Download CSV** saves site, address, groups, model, serial, version, architecture, uptime, and licence level.
+4. **Download CSV** saves site, address, groups, model, serial, version, channel, architecture, uptime, and licence level.
 
 ## Monitoring
 

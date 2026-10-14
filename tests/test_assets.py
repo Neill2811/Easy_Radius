@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-from easy_radius.facts import fetch_latest_stable, outdated, parse_version, upgrade_many
+from easy_radius.facts import fetch_latest, fetch_latest_stable, outdated, parse_version, read_facts, upgrade_many
 from easy_radius.store import load_state, prepare_state, save_state
 from easy_radius.web import create_app
 
@@ -39,6 +39,28 @@ def test_version_compare_and_upstream_parse():
             return False
 
     assert fetch_latest_stable(lambda url, timeout=10: Response()) == "7.24.5"
+    seen = []
+
+    def opener(url, timeout=10):
+        seen.append(url)
+        return Response()
+
+    assert fetch_latest("long-term", opener) == "7.24.5"
+    assert seen == ["https://upgrade.mikrotik.com/routeros/NEWESTa7.long-term"]
+
+    class Facts:
+        def get(self, path):
+            if path == "/system/resource":
+                return {"version": "7.16.2", "architecture-name": "arm64", "board-name": "RB", "uptime": "1d"}
+            if path == "/system/routerboard":
+                return {"model": "RB5009", "serial-number": "SERIAL-EXAMPLE"}
+            if path == "/system/license":
+                return {"level": "6"}
+            if path == "/system/package/update":
+                return {"channel": "long-term"}
+            return {}
+
+    assert read_facts(Facts())["channel"] == "long-term"
 
 
 class UpgradeRouter:
@@ -52,7 +74,7 @@ class UpgradeRouter:
         return "# export\n"
 
     def call(self, path, command, **kwargs):
-        self.events.append((path, command))
+        self.events.append((path, command, kwargs))
         if command == "install" and self.reboot:
             raise TimeoutError("timed out")
         if self.fail and command == "check-for-updates":
@@ -82,12 +104,18 @@ def test_upgrade_backs_up_then_stops_after_a_failure(tmp_path):
     results = upgrade_many(routers, connector, "radius-auto", PASSWORD, tmp_path, batch=1)
     assert [item["status"] for item in results] == ["started", "failed", "skipped"]
     assert sessions["192.0.2.10"].events[0] == "export"
-    assert ("/system/package/update", "install") in sessions["192.0.2.10"].events
+    calls = [event for event in sessions["192.0.2.10"].events if isinstance(event, tuple)]
+    assert ("/system/package/update", "set", {"channel": "stable"}) not in calls
+    assert calls[0] == ("/system/package/update", "check-for-updates", {})
+    assert ("/system/package/update", "install", {}) in calls
     assert (tmp_path / "firmware-backups" / "r1").exists()
     assert sessions["192.0.2.12"].events == []
     reboot = UpgradeRouter(reboot=True)
     one = upgrade_many([routers[0]], lambda *args, **kwargs: reboot, "radius-auto", PASSWORD, tmp_path)
     assert one[0]["status"] == "started"
+    moved = UpgradeRouter()
+    upgrade_many([routers[0]], lambda *args, **kwargs: moved, "radius-auto", PASSWORD, tmp_path, channel="long-term")
+    assert ("/system/package/update", "set", {"channel": "long-term"}) in moved.events
 
 
 def test_inventory_csv_and_firmware_page(tmp_path):
@@ -101,7 +129,15 @@ def test_inventory_csv_and_firmware_page(tmp_path):
             "ip": "192.0.2.10",
             "enabled": True,
             "tags": ["North"],
-            "facts": {"model": "RB5009", "serial": "SERIAL-EXAMPLE", "version": "7.16.2", "arch": "arm64", "uptime": "1d", "licence": "6"},
+            "facts": {
+                "model": "RB5009",
+                "serial": "SERIAL-EXAMPLE",
+                "version": "7.16.2",
+                "channel": "stable",
+                "arch": "arm64",
+                "uptime": "1d",
+                "licence": "6",
+            },
         }
     ]
     state["firmware_latest"] = "7.24.5"
@@ -116,10 +152,25 @@ def test_inventory_csv_and_firmware_page(tmp_path):
     body = client.get("/inventory").get_data(as_text=True)
     assert "North" in body and "RB5009" in body and "SERIAL-EXAMPLE" in body
     csv_body = client.get("/inventory.csv").get_data(as_text=True)
-    assert "ExampleSite,192.0.2.10,North,RB5009,SERIAL-EXAMPLE,7.16.2,arm64,1d,6,yes" in csv_body
+    assert "ExampleSite,192.0.2.10,North,RB5009,SERIAL-EXAMPLE,7.16.2,stable,arm64,1d,6,yes" in csv_body
     firmware = client.get("/firmware").get_data(as_text=True)
     assert "outdated" in firmware
     assert "7.24.5" in firmware
+    assert "stable" in firmware
+    state["routers"].append(
+        {
+            "id": "r-lt",
+            "site_name": "Example Long",
+            "ip": "192.0.2.14",
+            "enabled": True,
+            "tags": ["North"],
+            "facts": {"model": "RB5009", "version": "7.16.2", "channel": "long-term"},
+        }
+    )
+    save_state(data, state)
+    channels = client.get("/firmware").get_data(as_text=True)
+    assert "Example Long" in channels
+    assert channels.count("outdated") == 1
 
     state["routers"].append(
         {"id": "r2", "site_name": "Example North", "ip": "192.0.2.11", "enabled": True, "tags": ["North"]}

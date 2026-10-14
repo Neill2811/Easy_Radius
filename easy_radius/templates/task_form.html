@@ -11,9 +11,12 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label for="name">Name</label>
     <input id="name" name="name" value="{{ task.name }}">
-    <label for="body">Task</label>
-    <textarea id="body" name="body" required>{{ task.body }}</textarea>
-    <p class="help">Example: <code>/ip/dns set servers=192.0.2.53 allow-remote-requests=no</code></p>
+    <label for="commands">Commands</label>
+    <textarea id="commands" name="commands">{{ task.commands or '' }}</textarea>
+    <p class="help">One RouterOS command per line. Examples: <code>/ip dns set servers=192.0.2.53</code>, <code>/system ntp client set enabled=yes</code>, <code>/ip service set ftp address=192.0.2.0/24</code>. Verbs: set, add, remove, enable, disable. An item can be a name (<code>ftp</code>) or <code>[find name=ftp]</code>. The line is checked before it is saved.</p>
+    <label for="body">YAML or JSON</label>
+    <textarea id="body" name="body">{{ task.body }}</textarea>
+    <p class="help">Leave commands blank to use this instead. Example: <code>/ip/dns set servers=192.0.2.53 allow-remote-requests=no</code></p>
     <button type="submit">Save</button>
   </form>
 </div>
