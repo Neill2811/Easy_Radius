@@ -21,6 +21,27 @@
   </form>
   {% if schedule.last_run %}<p class="help">Last run {{ schedule.last_run }}</p>{% endif %}
 </div>
+{% if backup_run and (backup_run.routers or backup_run.error) %}
+<div class="card">
+  <h2>Last backup</h2>
+  <p class="help">{{ backup_run.at }}{% if backup_run.actor %} by {{ backup_run.actor }}{% endif %}</p>
+  {% if backup_run.error %}<p class="error">{{ backup_run.error }}</p>{% endif %}
+  {% if backup_run.routers %}
+  <table>
+    <thead><tr><th>Site</th><th>Result</th><th>Detail</th></tr></thead>
+    <tbody>
+      {% for row in backup_run.routers %}
+      <tr>
+        <td data-label="Site">{{ row.site_name }}</td>
+        <td data-label="Result">{{ row.status }}</td>
+        <td data-label="Detail">{{ row.detail }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endif %}
 {% if alerts %}
 <div class="card">
   <h2>Changes outside Easy Radius</h2>
@@ -35,12 +56,13 @@
   <h2 class="section">Routers</h2>
   {% if routers %}
   <table>
-    <thead><tr><th>Site</th><th>Latest</th><th></th></tr></thead>
+    <thead><tr><th>Site</th><th>Latest</th><th>Last backup</th><th></th></tr></thead>
     <tbody>
       {% for router in routers %}
       <tr>
         <td data-label="Site">{{ router.site_name }}</td>
         <td data-label="Latest">{{ router.versions[0] if router.versions else "none" }}</td>
+        <td data-label="Last backup">{% if router.last_status == 'failed' %}Last backup: {{ router.last_at }} failed: {{ router.last_detail }}{% elif router.last_status %}Last backup: {{ router.last_at }} {{ router.last_status }}{% else %}none{% endif %}</td>
         <td data-label="Actions">{% if router.versions|length > 1 %}<a href="{{ url_for('config_backup_diff', router_id=router.id) }}">Diff</a>{% endif %}</td>
       </tr>
       {% endfor %}

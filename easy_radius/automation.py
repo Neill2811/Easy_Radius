@@ -43,6 +43,7 @@ class Step:
     path: str
     values: dict[str, str]
     where: dict[str, str] = field(default_factory=dict)
+    verb: str = "set"
 
 
 @dataclass
@@ -154,6 +155,18 @@ def _step_from_mapping(item: dict) -> Step:
 def parse_template(body: str) -> Template:
     if len(body.encode("utf-8")) > _MAX_BODY:
         raise AutomationError("That task is too large.")
+    from easy_radius.routeros_cli import CommandSyntaxError, looks_like_commands, parse_commands
+
+    if looks_like_commands(body):
+        try:
+            commands, _warnings = parse_commands(body)
+        except CommandSyntaxError as exc:
+            raise AutomationError(str(exc)) from exc
+        steps = [
+            Step(path=item.path, values=dict(item.values), where=dict(item.where), verb=item.verb)
+            for item in commands
+        ]
+        return Template(name="Task", variables={}, steps=steps)
     try:
         loaded = yaml.safe_load(body)
     except yaml.YAMLError as exc:
@@ -389,6 +402,45 @@ def _apply_one(session, template: Template, variables: dict[str, str], dry_run: 
     for step in template.steps:
         desired = {key: substitute(value, variables) for key, value in step.values.items()}
         where = {key: substitute(value, variables) for key, value in step.where.items()}
+        verb = step.verb or "set"
+        if verb == "enable":
+            desired["disabled"] = "no"
+            verb = "set"
+        elif verb == "disable":
+            desired["disabled"] = "yes"
+            verb = "set"
+        if verb == "add":
+            rows = session.rows(step.path) if hasattr(session, "rows") else []
+            exists = any(
+                all(same_value(row.get(key), value) for key, value in desired.items()) for row in rows
+            )
+            if exists:
+                output.append(f"{step.path}: already set")
+            else:
+                rendered = " ".join(f"{key}={value}" for key, value in desired.items())
+                output.append(f"{step.path}: add {rendered}")
+                changed = True
+                if not dry_run:
+                    session.add(step.path, desired)
+            continue
+        if verb == "remove":
+            if not where:
+                raise AutomationError(f"{step.path} remove needs a selector")
+            rows = session.rows(step.path) if hasattr(session, "rows") else []
+            matched = [
+                row
+                for row in rows
+                if all(same_value(row.get(key), value) for key, value in where.items())
+            ]
+            label = f"{step.path} {where}"
+            if not matched:
+                output.append(f"{label}: nothing to change")
+            else:
+                output.append(f"{label}: remove")
+                changed = True
+                if not dry_run:
+                    session.remove(step.path, where)
+            continue
         if where and hasattr(session, "rows"):
             matched = [
                 row

@@ -26,10 +26,13 @@ def evaluate(session, server_address: str = "") -> list[dict]:
     def add(check_id: str, title: str, passed: bool, detail: str) -> None:
         checks.append({"id": check_id, "title": title, "passed": passed, "detail": detail})
 
-    for name in ("telnet", "ftp", "www"):
+    for name in ("telnet", "www"):
         row = _service(services, name)
         passed = row is not None and _disabled(row.get("disabled"))
         add(name, f"{name} is off", passed, "disabled" if passed else "still enabled")
+    ftp = _service(services, "ftp")
+    ftp_passed, ftp_detail = _ftp(ftp)
+    add("ftp", "FTP is on and restricted", ftp_passed, ftp_detail)
     admin = next((row for row in users if str(row.get("name", "")).lower() == "admin"), None)
     admin_ok = admin is None or _disabled(admin.get("disabled"))
     add("admin", "Default admin is removed or disabled", admin_ok, "no enabled admin user" if admin_ok else "admin can still log in")
@@ -46,6 +49,17 @@ def evaluate(session, server_address: str = "") -> list[dict]:
     radius_ok = same_value(aaa.get("use-radius"), "true")
     add("radius", "RADIUS login is enabled", radius_ok, "use-radius is on" if radius_ok else "use-radius is off")
     return checks
+
+
+def _ftp(row: dict | None) -> tuple[bool, str]:
+    """FTP must stay enabled and limited to specific addresses."""
+    if row is None or _disabled(row.get("disabled")):
+        return False, "disabled"
+    addresses = [part.strip() for part in str(row.get("address") or "").split(",") if part.strip()]
+    open_any = {"", "0.0.0.0/0", "::/0"}
+    if not addresses or any(part in open_any for part in addresses):
+        return False, "enabled, open to any address"
+    return True, "enabled, restricted to " + ",".join(addresses)
 
 
 def _plaintext_api(row: dict | None) -> tuple[bool, str]:
@@ -67,7 +81,6 @@ def score(checks: list[dict]) -> tuple[int, int]:
 def fix_template(server_address: str) -> Template:
     steps = [
         Step("/ip/service", {"disabled": "yes"}, {"name": "telnet"}),
-        Step("/ip/service", {"disabled": "yes"}, {"name": "ftp"}),
         Step("/ip/service", {"disabled": "yes"}, {"name": "www"}),
         Step("/user/aaa", {"use-radius": "yes"}, {}),
         Step("/user", {"disabled": "yes"}, {"name": "admin"}),

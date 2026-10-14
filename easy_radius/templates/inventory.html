@@ -16,7 +16,7 @@
 <div class="card">
   <h2>{{ group.name }}</h2>
   <table>
-    <thead><tr><th>Site</th><th>IP</th><th>Model</th><th>Serial</th><th>Version</th><th>Uptime</th><th>Licence</th></tr></thead>
+    <thead><tr><th>Site</th><th>IP</th><th>Model</th><th>Serial</th><th>Version</th><th>Channel</th><th>Uptime</th><th>Licence</th></tr></thead>
     <tbody>
       {% for router in group.routers %}
       {% set facts = router.facts or {} %}
@@ -26,6 +26,7 @@
         <td>{{ facts.model }}</td>
         <td>{{ facts.serial }}</td>
         <td>{{ facts.version or 'unknown' }}</td>
+        <td>{{ facts.channel or 'unknown' }}</td>
         <td>{{ facts.uptime }}</td>
         <td>{{ facts.licence }}</td>
       </tr>

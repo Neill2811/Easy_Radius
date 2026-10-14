@@ -10,7 +10,15 @@ from flask import Response, flash, redirect, render_template, request, url_for
 
 from easy_radius.audit import record
 from easy_radius.automation import AutomationError, account_password
-from easy_radius.facts import fetch_latest_stable, outdated, refresh_router, upgrade_many, version_label
+from easy_radius.facts import (
+    CHANNELS,
+    fetch_latest,
+    latest_by_channel,
+    outdated,
+    refresh_router,
+    upgrade_many,
+    version_label,
+)
 from easy_radius.store import load_state, save_state
 
 
@@ -18,36 +26,49 @@ def register_assets(app) -> None:
     @app.get("/firmware")
     def firmware():
         state = load_state(app.config["DATA_DIR"])
-        latest = _latest(state)
+        latest = latest_by_channel(state)
         rows = []
         for router in state["routers"]:
             facts = router.get("facts") if isinstance(router.get("facts"), dict) else {}
+            channel = str(facts.get("channel") or "").strip()
+            current = latest.get(channel) or ""
             rows.append(
                 {
                     "router": router,
                     "facts": facts,
                     "version": version_label(facts.get("version")),
-                    "outdated": outdated(facts.get("version"), latest) if latest else False,
+                    "channel": channel,
+                    "outdated": bool(current) and channel in CHANNELS and outdated(facts.get("version"), current),
                 }
             )
-        return render_template("firmware.html", rows=rows, latest=latest, manual=state.get("firmware_latest") or "")
+        return render_template("firmware.html", rows=rows, latest=latest, channels=CHANNELS)
 
     @app.post("/firmware/latest")
     def firmware_latest():
         state = load_state(app.config["DATA_DIR"])
-        manual = request.form.get("firmware_latest", "").strip()
-        if manual:
-            state["firmware_latest"] = manual
-            record(state, "firmware", f"Set latest stable version to {manual}")
-        else:
+        stored = latest_by_channel(state)
+        missed = []
+        for channel in CHANNELS:
+            manual = request.form.get(f"latest_{channel}", "").strip()
+            if manual:
+                stored[channel] = manual
+                continue
             try:
-                state["firmware_latest"] = fetch_latest_stable()
-                record(state, "firmware", f"Fetched latest stable version {state['firmware_latest']}")
+                stored[channel] = fetch_latest(channel)
             except Exception:
-                flash("Could not reach the MikroTik version list. Type the latest stable version instead.", "error")
-                return redirect(url_for("firmware"))
+                missed.append(channel)
+        state["firmware_latest"] = stored
+        record(state, "firmware", "Saved latest RouterOS versions for " + ", ".join(CHANNELS))
         save_state(app.config["DATA_DIR"], state)
-        flash("Latest stable version saved.", "ok")
+        if missed:
+            flash(
+                "Could not fetch "
+                + ", ".join(missed)
+                + ". Type that version, or leave the box blank to try again.",
+                "error",
+            )
+        else:
+            flash("Latest versions saved.", "ok")
         return redirect(url_for("firmware"))
 
     @app.post("/firmware/refresh")
@@ -75,7 +96,16 @@ def register_assets(app) -> None:
         except AutomationError as exc:
             flash(str(exc), "error")
             return redirect(url_for("firmware"))
-        results = upgrade_many(targets, _connector(app), username, password, data_dir, batch)
+        channel = request.form.get("channel", "").strip()
+        results = upgrade_many(
+            targets,
+            _connector(app),
+            username,
+            password,
+            data_dir,
+            batch,
+            channel=channel or None,
+        )
         state["last_upgrade"] = {"at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "routers": results}
         names = ", ".join(f"{item['site_name']} {item['status']}" for item in results)
         record(state, "firmware", f"Firmware upgrade by neill: {names}")
@@ -97,7 +127,7 @@ def register_assets(app) -> None:
         state = load_state(app.config["DATA_DIR"])
         buffer = io.StringIO()
         writer = csv.writer(buffer)
-        writer.writerow(["site", "ip", "groups", "model", "serial", "version", "arch", "uptime", "licence", "enabled"])
+        writer.writerow(["site", "ip", "groups", "model", "serial", "version", "channel", "arch", "uptime", "licence", "enabled"])
         for router in state["routers"]:
             facts = router.get("facts") if isinstance(router.get("facts"), dict) else {}
             writer.writerow(
@@ -108,6 +138,7 @@ def register_assets(app) -> None:
                     facts.get("model") or "",
                     facts.get("serial") or "",
                     version_label(facts.get("version")),
+                    facts.get("channel") or "",
                     facts.get("arch") or "",
                     facts.get("uptime") or "",
                     facts.get("licence") or "",
@@ -131,16 +162,6 @@ def _groups(routers: list[dict]) -> list[dict]:
         for tag in tags:
             groups.setdefault(tag, []).append(shown)
     return [{"name": name, "routers": groups[name]} for name in sorted(groups)]
-
-
-def _latest(state: dict) -> str:
-    manual = str(state.get("firmware_latest") or "").strip()
-    if manual:
-        return manual
-    try:
-        return fetch_latest_stable()
-    except Exception:
-        return ""
 
 
 def _refresh(app, target: str):

@@ -177,7 +177,7 @@ textarea {
 }
 
 .flash.ok, .banner.ok { background: #e8f6ee; color: var(--ok); }
-.flash.error, .error, .banner.error { background: #fdecec; color: var(--danger); }
+.flash.error, .error, .banner.error { background: #fdecec; color: var(--danger); white-space: pre-wrap; }
 
 .output {
   background: #1f1f1f;

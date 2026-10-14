@@ -106,6 +106,70 @@ def backup_due(schedule: dict, now: datetime) -> bool:
     return not last.startswith(now.strftime("%Y-%m-%d"))
 
 
+def explain_backup_error(text: str, password: str = "") -> str:
+    """Turn a connection failure into a short reason. The password is never kept."""
+    cleaned = _scrub(text or "", password)
+    low = cleaned.lower()
+    if "connection refused" in low or "errno 111" in low:
+        return "connection refused"
+    if any(word in low for word in ("handshake", "certificate", "tls", "wrong version number")):
+        return "api-ssl has no certificate"
+    if any(
+        word in low
+        for word in (
+            "authentication",
+            "login failed",
+            "bad password",
+            "invalid password",
+            "invalid user",
+            "access denied",
+            "cannot log in",
+            "rejected",
+        )
+    ):
+        return "service account rejected; check Apply/permissions"
+    if "no route" in low:
+        return "no route to host"
+    if "timed out" in low or "timeout" in low:
+        return "timed out"
+    return cleaned
+
+
+def complete_backup(state: dict, data_dir: Path, connector, actor: str, now: datetime | None = None) -> dict:
+    """Run backups, keep the per-router result, and advance the schedule."""
+    when = now or datetime.now(timezone.utc)
+    try:
+        result = run_backups(state, data_dir, connector, actor=actor, now=when)
+    except AutomationError as exc:
+        detail = explain_backup_error(str(exc))
+        record(state, "backup", f"Backup failed: {detail}", actor=actor)
+        result = {
+            "at": when.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "actor": actor,
+            "routers": [],
+            "error": detail,
+        }
+    schedule = {**default_schedule(), **(state.get("backup_schedule") or {})}
+    schedule["last_run"] = result["at"]
+    state["backup_schedule"] = schedule
+    state["last_backup_run"] = {
+        "at": result["at"],
+        "actor": result.get("actor") or actor,
+        "error": result.get("error") or "",
+        "routers": [
+            {
+                "id": item.get("id") or "",
+                "site_name": item.get("site_name") or "",
+                "status": item.get("status") or "failed",
+                "detail": item.get("detail") or "",
+                "stamp": item.get("stamp") or "",
+            }
+            for item in result.get("routers") or []
+        ],
+    }
+    return state["last_backup_run"]
+
+
 def run_backups(state: dict, data_dir: Path, connector, actor: str, now: datetime | None = None) -> dict:
     when = now or datetime.now(timezone.utc)
     username, password = account_password(state)
@@ -120,12 +184,12 @@ def run_backups(state: dict, data_dir: Path, connector, actor: str, now: datetim
         try:
             session = _open(connector, router, username, password)
         except Exception as exc:
-            done.append({"id": router["id"], "site_name": router["site_name"], "status": "failed", "detail": _scrub(str(exc), password)})
+            _failed(state, done, router, exc, password, actor)
             continue
         try:
             text = session.export()
         except Exception as exc:
-            done.append({"id": router["id"], "site_name": router["site_name"], "status": "failed", "detail": _scrub(str(exc), password)})
+            _failed(state, done, router, exc, password, actor)
             continue
         finally:
             close = getattr(session, "close", None)
@@ -173,6 +237,12 @@ def run_backups(state: dict, data_dir: Path, connector, actor: str, now: datetim
     state.setdefault("change_alerts", [])
     state["change_alerts"] = (alerts + list(state.get("change_alerts") or []))[:100]
     return {"at": when.strftime("%Y-%m-%dT%H:%M:%SZ"), "actor": actor, "routers": done}
+
+
+def _failed(state: dict, done: list, router: dict, exc: Exception, password: str, actor: str) -> None:
+    detail = explain_backup_error(str(exc), password)
+    done.append({"id": router["id"], "site_name": router["site_name"], "status": "failed", "detail": detail})
+    record(state, "backup", f"Backup failed for {router['site_name']}: {detail}", actor=actor)
 
 
 def _open(connector, router, username, password):
