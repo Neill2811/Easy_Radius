@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Firmware · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Firmware</h1>
+</div>
+<div class="card">
+  <p class="help">Versions come from the router. Latest stable is read from MikroTik when this page can reach it, or you can type it. An upgrade saves <code>/export</code> first, then installs the stable channel. Routers reboot. A failure stops the next batch.</p>
+  <p>{% if latest %}Latest stable: <strong>{{ latest }}</strong>{% else %}Latest stable is not known yet.{% endif %}</p>
+  <form method="post" action="{{ url_for('firmware_latest') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="firmware_latest">Latest stable version</label>
+    <input id="firmware_latest" name="firmware_latest" value="{{ manual }}" placeholder="Leave blank to fetch">
+    <button class="secondary" type="submit">Save or fetch</button>
+  </form>
+  <form method="post" action="{{ url_for('firmware_refresh') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Refresh from routers</button>
+  </form>
+</div>
+<div class="card">
+  <form method="post" action="{{ url_for('firmware_upgrade') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <table>
+      <thead><tr><th></th><th>Site</th><th>Model</th><th>Arch</th><th>Version</th></tr></thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td><input type="checkbox" name="router_ids" value="{{ row.router.id }}"></td>
+          <td>{{ row.router.site_name }}</td>
+          <td>{{ row.facts.model }}</td>
+          <td>{{ row.facts.arch }}</td>
+          <td>{{ row.facts.version }}{% if row.outdated %} <span class="tag warn">outdated</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <label for="batch">Routers at a time</label>
+    <input id="batch" name="batch" type="number" min="1" max="50" value="1">
+    <label class="choice"><input type="checkbox" name="confirm_many" value="yes"> I confirm an upgrade when more than one router is ticked.</label>
+    <button type="submit">Upgrade ticked routers</button>
+  </form>
+</div>
+{% endblock %}
