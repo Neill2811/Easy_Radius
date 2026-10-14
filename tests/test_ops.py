@@ -303,27 +303,6 @@ def test_snmp_lists_communities_without_secrets_and_fails_public_or_open_write()
     assert "read-write" in detail
 
 
-def test_service_summary_lists_every_service():
-    from easy_radius.compliance import service_summary
-
-    class Router:
-        def rows(self, path):
-            if path == "/ip/service":
-                return [
-                    {"name": "ssh", "port": "22", "disabled": "false", "address": ""},
-                    {"name": "winbox", "port": "8291", "disabled": "no", "address": "192.0.2.0/24"},
-                    {"name": "ftp", "port": "21", "disabled": "yes", "address": "192.0.2.10/32"},
-                ]
-            return []
-
-    summary = service_summary(Router())
-    assert summary == [
-        {"name": "ssh", "port": "22", "state": "enabled", "addresses": ""},
-        {"name": "winbox", "port": "8291", "state": "enabled", "addresses": "192.0.2.0/24"},
-        {"name": "ftp", "port": "21", "state": "disabled", "addresses": "192.0.2.10/32"},
-    ]
-
-
 def test_plaintext_api_passes_when_disabled_or_limited_to_addresses():
     from easy_radius.compliance import _plaintext_api
 
@@ -346,7 +325,7 @@ def test_plaintext_api_passes_when_disabled_or_limited_to_addresses():
     )
 
 
-def test_compliance_page_lists_services_and_hides_community_secrets(tmp_path):
+def test_compliance_page_keeps_check_details_without_a_service_table(tmp_path):
     secret = "example-community-secret"
     data = tmp_path / "data"
     prepare_state(data, admin_password=PASSWORD)
@@ -416,13 +395,14 @@ def test_compliance_page_lists_services_and_hides_community_secrets(tmp_path):
     checked = client.post("/compliance/check", data={"csrf_token": token}, follow_redirects=True)
     body = checked.get_data(as_text=True)
     assert "enabled on port 8291, restricted to 192.0.2.0/24" in body
+    assert "Winbox is off or restricted" in body
     assert "www is off" in body
     assert "www-ssl is off" in body
-    assert "Services" in body
-    assert "winbox" in body
-    assert "8291" in body
+    assert "disabled on port 80" in body
+    assert "enabled on port 22, restricted to 192.0.2.10/32" in body
     assert "monitor" in body
-    assert "192.0.2.10/32" in body
+    assert "Allowed addresses" not in body
+    assert ">Services<" not in body
     assert secret not in body
     assert PASSWORD not in body
 
