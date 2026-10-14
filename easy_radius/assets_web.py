@@ -10,7 +10,7 @@ from flask import Response, flash, redirect, render_template, request, url_for
 
 from easy_radius.audit import record
 from easy_radius.automation import AutomationError, account_password
-from easy_radius.facts import fetch_latest_stable, outdated, refresh_router, upgrade_many
+from easy_radius.facts import fetch_latest_stable, outdated, refresh_router, upgrade_many, version_label
 from easy_radius.store import load_state, save_state
 
 
@@ -21,12 +21,13 @@ def register_assets(app) -> None:
         latest = _latest(state)
         rows = []
         for router in state["routers"]:
-            facts = router.get("facts") or {}
+            facts = router.get("facts") if isinstance(router.get("facts"), dict) else {}
             rows.append(
                 {
                     "router": router,
                     "facts": facts,
-                    "outdated": outdated(facts.get("version") or "", latest) if latest else False,
+                    "version": version_label(facts.get("version")),
+                    "outdated": outdated(facts.get("version"), latest) if latest else False,
                 }
             )
         return render_template("firmware.html", rows=rows, latest=latest, manual=state.get("firmware_latest") or "")
@@ -98,7 +99,7 @@ def register_assets(app) -> None:
         writer = csv.writer(buffer)
         writer.writerow(["site", "ip", "groups", "model", "serial", "version", "arch", "uptime", "licence", "enabled"])
         for router in state["routers"]:
-            facts = router.get("facts") or {}
+            facts = router.get("facts") if isinstance(router.get("facts"), dict) else {}
             writer.writerow(
                 [
                     router.get("site_name") or "",
@@ -106,7 +107,7 @@ def register_assets(app) -> None:
                     " ".join(router.get("tags") or []),
                     facts.get("model") or "",
                     facts.get("serial") or "",
-                    facts.get("version") or "",
+                    version_label(facts.get("version")),
                     facts.get("arch") or "",
                     facts.get("uptime") or "",
                     facts.get("licence") or "",
@@ -123,9 +124,12 @@ def register_assets(app) -> None:
 def _groups(routers: list[dict]) -> list[dict]:
     groups: dict[str, list] = {}
     for router in routers:
-        tags = router.get("tags") or ["Ungrouped"]
+        shown = dict(router)
+        facts = shown.get("facts") if isinstance(shown.get("facts"), dict) else {}
+        shown["facts"] = {**facts, "version": version_label(facts.get("version"))}
+        tags = shown.get("tags") or ["Ungrouped"]
         for tag in tags:
-            groups.setdefault(tag, []).append(router)
+            groups.setdefault(tag, []).append(shown)
     return [{"name": name, "routers": groups[name]} for name in sorted(groups)]
 
 

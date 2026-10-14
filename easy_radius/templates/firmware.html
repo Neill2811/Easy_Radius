@@ -30,7 +30,7 @@
           <td>{{ row.router.site_name }}</td>
           <td>{{ row.facts.model }}</td>
           <td>{{ row.facts.arch }}</td>
-          <td>{{ row.facts.version }}{% if row.outdated %} <span class="tag warn">outdated</span>{% endif %}</td>
+          <td>{{ row.version }}{% if row.outdated %} <span class="tag warn">outdated</span>{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>

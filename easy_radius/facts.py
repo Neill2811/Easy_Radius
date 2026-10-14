@@ -16,17 +16,27 @@ LATEST_URL = "https://upgrade.mikrotik.com/routeros/NEWESTa7.stable"
 _VERSION = re.compile(r"^\d+(?:\.\d+)+")
 
 
-def parse_version(text: str) -> tuple[int, ...]:
-    token = str(text or "").split()[0]
+def parse_version(text: str | None) -> tuple[int, ...] | None:
+    raw = "" if text is None else str(text).strip()
+    if not raw:
+        return None
+    token = raw.split()[0]
     if not _VERSION.match(token):
-        return ()
+        return None
     return tuple(int(part) for part in token.split("."))
 
 
-def outdated(installed: str, latest: str) -> bool:
+def version_label(text: str | None) -> str:
+    raw = "" if text is None else str(text).strip()
+    if parse_version(raw) is None:
+        return "unknown"
+    return raw
+
+
+def outdated(installed: str | None, latest: str | None) -> bool:
     left = parse_version(installed)
     right = parse_version(latest)
-    if not left or not right:
+    if left is None or right is None:
         return False
     width = max(len(left), len(right))
     return left + (0,) * (width - len(left)) < right + (0,) * (width - len(right))
@@ -36,7 +46,8 @@ def fetch_latest_stable(opener=None) -> str:
     open_url = opener or urllib.request.urlopen
     with open_url(LATEST_URL, timeout=10) as response:
         text = response.read(200).decode("utf-8", "replace")
-    version = text.split()[0].strip()
+    parts = text.split()
+    version = parts[0].strip() if parts else ""
     if not _VERSION.match(version):
         raise ValueError("Upstream version was not recognised")
     return version
