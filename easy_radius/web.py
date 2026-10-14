@@ -26,6 +26,7 @@ from easy_radius.audit import record
 from easy_radius.backup import BackupError, apply_payload, decrypt_backup, encrypt_backup, export_payload
 from easy_radius.configgen import sanitise_client_name
 from easy_radius.hostcmd import make_runner
+from easy_radius.nav import NAV_GROUPS, current_nav, failing_routers, monitoring_attention
 from easy_radius.logs import (
     filter_auth,
     format_age,
@@ -127,6 +128,20 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         if "csrf_token" not in session:
             session["csrf_token"] = secrets.token_urlsafe(32)
         return {"csrf_token": session["csrf_token"]}
+
+    @app.context_processor
+    def inject_nav():
+        if not session.get("admin"):
+            return {}
+        state = load_state(app.config["DATA_DIR"])
+        failing = failing_routers(state)
+        return {
+            "nav_groups": NAV_GROUPS,
+            "nav_current": current_nav(request.endpoint),
+            "nav_failing": failing,
+            "nav_alert": monitoring_attention(state),
+            "nav_user": session.get("admin") or "neill",
+        }
 
     @app.get("/login")
     def login():
