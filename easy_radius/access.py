@@ -89,6 +89,62 @@ def request_allowed(
     return False
 
 
+def users_with_grants(users: list[dict], grants: list[dict], now: datetime | None = None) -> list[dict]:
+    """Add temporary router access that has not expired yet.
+
+    A user who already has all routers is left unchanged. Grants do not
+    remove access.
+    """
+    moment = now or datetime.now(timezone.utc)
+    now_text = moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+    extra: dict[str, dict[str, list]] = {}
+    for grant in grants or []:
+        if str(grant.get("expires_at") or "") <= now_text:
+            continue
+        bucket = extra.setdefault(str(grant.get("user_id")), {"ids": [], "tags": []})
+        for router_id in grant.get("router_ids") or []:
+            if router_id not in bucket["ids"]:
+                bucket["ids"].append(router_id)
+        for tag in grant.get("tags") or []:
+            if tag not in bucket["tags"]:
+                bucket["tags"].append(tag)
+    if not extra:
+        return list(users)
+    expanded = []
+    for user in users:
+        bonus = extra.get(str(user.get("id")))
+        if not bonus or user.get("access", "all") != "routers":
+            expanded.append(user)
+            continue
+        copy = dict(user)
+        router_ids = list(user.get("router_ids") or [])
+        tags = list(user.get("access_tags") or [])
+        for router_id in bonus["ids"]:
+            if router_id not in router_ids:
+                router_ids.append(router_id)
+        for tag in bonus["tags"]:
+            if tag not in tags:
+                tags.append(tag)
+        copy["router_ids"] = router_ids
+        copy["access_tags"] = tags
+        expanded.append(copy)
+    return expanded
+
+
+def drop_expired_grants(state: dict, now: datetime | None = None) -> list[dict]:
+    moment = now or datetime.now(timezone.utc)
+    now_text = moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+    kept = []
+    expired = []
+    for grant in state.get("grants") or []:
+        if str(grant.get("expires_at") or "") <= now_text:
+            expired.append(grant)
+        else:
+            kept.append(grant)
+    state["grants"] = kept
+    return expired
+
+
 def access_label(user: dict, routers: list[dict]) -> str:
     if user.get("access", "all") != "routers":
         return "All routers"

@@ -348,3 +348,30 @@ On the Automation page:
 10. The result for each router (ok, changed, failed, or skipped) is on the run page and under **History**, with your admin name on the row.
 
 The service-account password is not written into a task, a run, or History.
+
+## Monitoring
+
+1. Open **Monitoring**.
+2. Set how often to check, and the CPU, memory, and failed-login limits.
+3. Email: fill in the SMTP host, port, username, password, from address, and to address. Tick STARTTLS unless your mail server does not use it.
+4. Telegram: put the chat id and the bot token from BotFather. Leave the password and token blank later if you only want to change the other fields.
+5. Click **Save**. The password and token are not shown again.
+6. **Check now** looks immediately. A router is down only after it has been seen before and then gone quiet. A router that has never sent a packet is not called down. High CPU and memory are read from the router with the automation service account, so that account must exist and you must have clicked **Apply**.
+7. New alerts are sent once. The same alert is not sent again until it clears and comes back.
+
+## Temporary access
+
+1. Open **Access**.
+2. Choose a user who is limited to chosen routers. Someone who already has all routers does not need a grant.
+3. Tick the routers or a site group, and set the number of hours (up to 168).
+4. If you tick more than one, confirm it.
+5. **Grant access** updates FreeRADIUS immediately. History records who granted it and when it ends.
+6. When the time is up, Easy Radius removes the extra access and updates FreeRADIUS again. You do not have to click anything.
+
+## Reports
+
+1. Open **Reports**.
+2. Type a month as `2026-10`, or leave it blank for the current month.
+3. **Download PDF** saves the changes and login lines for that month.
+4. Tick **Also email a notice** if email alerts are already configured. The PDF itself is the download. The email is only a short notice.
+5. On the first day of each month, after 06:00 UTC, the same notice is sent on its own if email is configured.

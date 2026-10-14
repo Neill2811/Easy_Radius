@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from easy_radius.access import render_access_policy
+from easy_radius.access import render_access_policy, users_with_grants
 from easy_radius.configgen import render_clients_conf, render_users_file
 from easy_radius.hostcmd import CommandResult
 from easy_radius.perms import file_permission_args, freeradius_config_check_args, remember
@@ -88,7 +88,11 @@ def apply_configuration(
             (
                 Path(policy_path),
                 "easy_radius",
-                render_access_policy(state.get("users") or [], state.get("routers") or [], when=when),
+                render_access_policy(
+                    users_with_grants(state.get("users") or [], state.get("grants") or [], when),
+                    state.get("routers") or [],
+                    when=when,
+                ),
             )
         )
 

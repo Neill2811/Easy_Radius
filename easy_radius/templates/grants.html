@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Temporary access · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Temporary access</h1>
+</div>
+<div class="card">
+  <p class="help">Grant a RADIUS user extra routers or a site group for a few hours. Easy Radius updates FreeRADIUS immediately and removes the extra access when the time is up. This is written in History.</p>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="user_id">User</label>
+    <select id="user_id" name="user_id">
+      {% for user in users %}
+      <option value="{{ user.id }}">{{ user.username }}</option>
+      {% endfor %}
+    </select>
+    <label for="hours">Hours</label>
+    <input id="hours" name="hours" type="number" min="1" max="168" value="8">
+    <p class="help">Routers</p>
+    <div class="checkboxes">
+      {% for router in routers %}
+      <label><input type="checkbox" name="router_ids" value="{{ router.id }}"> {{ router.site_name }} ({{ router.ip }})</label>
+      {% endfor %}
+    </div>
+    {% if tags %}
+    <p class="help">Site groups</p>
+    <div class="checkboxes">
+      {% for tag in tags %}
+      <label><input type="checkbox" name="tags" value="{{ tag }}"> {{ tag }}</label>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <label class="choice"><input type="checkbox" name="confirm_many" value="yes"> I confirm this when more than one router or group is ticked.</label>
+    <button type="submit">Grant access</button>
+  </form>
+  {% if grants %}
+  <h2 class="section">Active grants</h2>
+  <table>
+    <thead><tr><th>User</th><th>Until</th><th>Who</th></tr></thead>
+    <tbody>
+      {% for grant in grants %}
+      <tr>
+        <td>{{ grant.username }}</td>
+        <td>{{ grant.expires_at }}</td>
+        <td>{{ grant.actor }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endblock %}

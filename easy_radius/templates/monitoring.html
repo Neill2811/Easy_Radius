@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Monitoring · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Monitoring</h1>
+</div>
+<div class="card">
+  <p class="help">Alerts cover a router that has gone quiet, high CPU or memory, and a burst of failed logins. Email and Telegram are optional. WhatsApp is not used. Passwords and the bot token are encrypted and are not shown after you save them.</p>
+  <form method="post" action="{{ url_for('monitoring_settings') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="choice"><input type="checkbox" name="enabled" value="yes" {% if settings.enabled %}checked{% endif %}> Alerts on</label>
+    <label for="interval_minutes">Check every (minutes)</label>
+    <input id="interval_minutes" name="interval_minutes" type="number" min="1" value="{{ settings.interval_minutes }}">
+    <label for="cpu_pct">CPU alert at %</label>
+    <input id="cpu_pct" name="cpu_pct" type="number" min="1" max="100" value="{{ settings.cpu_pct }}">
+    <label for="memory_pct">Memory alert at %</label>
+    <input id="memory_pct" name="memory_pct" type="number" min="1" max="100" value="{{ settings.memory_pct }}">
+    <label for="reject_count">Failed logins before an alert</label>
+    <input id="reject_count" name="reject_count" type="number" min="1" value="{{ settings.reject_count }}">
+    <h2 class="section">Email</h2>
+    <label for="smtp_host">SMTP host</label>
+    <input id="smtp_host" name="smtp_host" value="{{ settings.smtp_host }}">
+    <label for="smtp_port">SMTP port</label>
+    <input id="smtp_port" name="smtp_port" value="{{ settings.smtp_port }}">
+    <label for="smtp_user">SMTP username</label>
+    <input id="smtp_user" name="smtp_user" value="{{ settings.smtp_user }}">
+    <label for="smtp_password">SMTP password</label>
+    <input id="smtp_password" name="smtp_password" type="password" autocomplete="new-password">
+    {% if smtp_saved %}<p class="help">A password is saved. Leave this blank to keep it.</p>{% endif %}
+    <label for="smtp_from">From</label>
+    <input id="smtp_from" name="smtp_from" value="{{ settings.smtp_from }}">
+    <label for="smtp_to">To</label>
+    <input id="smtp_to" name="smtp_to" value="{{ settings.smtp_to }}">
+    <label class="choice"><input type="checkbox" name="smtp_tls" value="yes" {% if settings.smtp_tls %}checked{% endif %}> Use STARTTLS</label>
+    <h2 class="section">Telegram</h2>
+    <label for="telegram_chat">Chat id</label>
+    <input id="telegram_chat" name="telegram_chat" value="{{ settings.telegram_chat }}">
+    <label for="telegram_token">Bot token</label>
+    <input id="telegram_token" name="telegram_token" type="password" autocomplete="new-password">
+    {% if telegram_saved %}<p class="help">A token is saved. Leave this blank to keep it.</p>{% endif %}
+    <button type="submit">Save</button>
+  </form>
+  <form method="post" action="{{ url_for('monitoring_check') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="secondary" type="submit">Check now</button>
+  </form>
+  {% if alerts %}
+  <h2 class="section">Current alerts</h2>
+  <ul>{% for alert in alerts %}<li>{{ alert.site_name }} {{ alert.detail }}</li>{% endfor %}</ul>
+  {% endif %}
+</div>
+{% endblock %}
