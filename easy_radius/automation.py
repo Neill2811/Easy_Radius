@@ -42,6 +42,7 @@ class AutomationError(Exception):
 class Step:
     path: str
     values: dict[str, str]
+    where: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -143,7 +144,11 @@ def _step_from_mapping(item: dict) -> Step:
     if not isinstance(raw, dict) or not raw:
         raise AutomationError(f"{path} needs a set list of values.")
     values = {str(key): "" if value is None else str(value) for key, value in raw.items()}
-    return Step(path=path, values=values)
+    where_raw = item.get("where") or {}
+    if not isinstance(where_raw, dict):
+        raise AutomationError(f"{path} where must be name=value pairs.")
+    where = {str(key): "" if value is None else str(value) for key, value in where_raw.items()}
+    return Step(path=path, values=values, where=where)
 
 
 def parse_template(body: str) -> Template:
@@ -383,13 +388,29 @@ def _apply_one(session, template: Template, variables: dict[str, str], dry_run: 
         output.append(f"Saved /export ({len(text)} characters). Secrets are hidden.")
     for step in template.steps:
         desired = {key: substitute(value, variables) for key, value in step.values.items()}
-        current = session.get(step.path)
+        where = {key: substitute(value, variables) for key, value in step.where.items()}
+        if where and hasattr(session, "rows"):
+            matched = [
+                row
+                for row in session.rows(step.path)
+                if all(same_value(row.get(key), value) for key, value in where.items())
+            ]
+            if not matched:
+                output.append(f"{step.path} {where}: nothing to change")
+                continue
+            current = {str(key): str(value) for key, value in matched[0].items() if key != ".id"}
+        else:
+            current = session.get(step.path)
         changes = plan_changes(current, desired)
-        output.append(render_diff(step.path, current, changes))
+        label = step.path if not where else f"{step.path} {where}"
+        output.append(render_diff(label, current, changes))
         if changes:
             changed = True
             if not dry_run:
-                session.set(step.path, changes)
+                if where and hasattr(session, "set_matching"):
+                    session.set_matching(step.path, where, changes)
+                else:
+                    session.set(step.path, changes)
     status = "changed" if changed else "ok"
     if dry_run and changed:
         output.append("Dry run: nothing was written.")
@@ -429,7 +450,7 @@ def execute_run(
 
         def work(index: int, router: dict) -> None:
             try:
-                session = connector(router["ip"], username, password)
+                session = _connect(connector, router, username, password)
             except Exception as exc:
                 wave_results[index] = {
                     "id": router["id"],
@@ -544,6 +565,26 @@ def launch_run(
         job()
     else:
         threading.Thread(target=job, daemon=True).start()
+
+
+def _connect(connector, router: dict, username: str, password: str):
+    allow = bool(router.get("api_plaintext"))
+    try:
+        return connector(router["ip"], username, password, allow_plaintext=allow)
+    except TypeError:
+        return connector(router["ip"], username, password)
+
+
+def note_touches(state: dict, run: dict) -> None:
+    """Remember routers this app changed, so a later backup can ignore them."""
+    if run.get("mode") != "run":
+        return
+    when = run.get("finished_at") or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    touches = dict(state.get("router_touches") or {})
+    for router in run.get("routers") or []:
+        if router.get("status") == "changed":
+            touches[str(router.get("id"))] = when
+    state["router_touches"] = touches
 
 
 def finish_audit(state: dict, run: dict) -> None:

@@ -19,6 +19,8 @@
     <label for="tags">Tags</label>
     <input id="tags" name="tags" value="{{ (router.tags or [])|join(', ') }}" placeholder="North, Core">
     <p class="help">Optional site groups. A user can be allowed a whole tag.</p>
+    <label class="choice"><input type="checkbox" name="api_plaintext" value="yes" {% if router.api_plaintext %}checked{% endif %}> Allow plaintext API on port 8728 if API-SSL fails</label>
+    <p class="help">Off by default. Tick this only for a router that has no API-SSL.</p>
     <button type="submit">Save</button>
   </form>
 </div>
