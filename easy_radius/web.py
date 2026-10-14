@@ -25,6 +25,7 @@ from easy_radius.apply import apply_configuration, run_radtest
 from easy_radius.audit import record
 from easy_radius.backup import BackupError, apply_payload, decrypt_backup, encrypt_backup, export_payload
 from easy_radius.configgen import sanitise_client_name
+from easy_radius.dashboard import build_dashboard
 from easy_radius.hostcmd import make_runner
 from easy_radius.nav import NAV_GROUPS, current_nav, failing_routers, monitoring_attention
 from easy_radius.logs import (
@@ -146,7 +147,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
     @app.get("/login")
     def login():
         if session.get("admin"):
-            return redirect(url_for("routers"))
+            return redirect(url_for("index"))
         return render_template("login.html", error=None, need_code=bool(session.get("pending_2fa")))
 
     @app.post("/login")
@@ -182,7 +183,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         session["admin"] = "neill"
         session["csrf_token"] = secrets.token_urlsafe(32)
         session.permanent = True
-        return redirect(url_for("routers"))
+        return redirect(url_for("index"))
 
     @app.post("/logout")
     def logout():
@@ -191,7 +192,20 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
 
     @app.get("/")
     def index():
-        return redirect(url_for("routers"))
+        data_dir = app.config["DATA_DIR"]
+        state = load_state(data_dir)
+        auth = parse_auth_log(tail_text(app.config["AUTH_LOG"]))
+        acct = parse_acct_log(tail_text(app.config["ACCT_LOG"]))
+        dash = build_dashboard(
+            state,
+            auth,
+            acct,
+            now=int(time.time()),
+            health_seconds=int(app.config.get("HEALTH_SECONDS") or 900),
+            data_dir=data_dir,
+            runner=app.config["RUNNER"],
+        )
+        return render_template("dashboard.html", dash=dash)
 
     @app.get("/routers")
     def routers():
