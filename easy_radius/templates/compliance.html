@@ -5,7 +5,7 @@
   <h1>Compliance</h1>
 </div>
 <div class="card">
-  <p class="help">Checks telnet and www are off, FTP is enabled and limited to specific addresses, the default admin cannot log in, NTP is set, api-ssl is limited to an address, plaintext API is off or limited to specific addresses, and RADIUS login is on. Fix uses the automation service account and writes only what differs. It does not turn off the plaintext API, and it does not change FTP.</p>
+  <p class="help">Checks telnet, www, and www-ssl are off, FTP is enabled and limited to specific addresses, Winbox is off or limited to specific addresses, the default admin cannot log in, NTP is set, api-ssl is limited to an address, plaintext API is off or limited to specific addresses, SNMP has no enabled public community and no open write community, and RADIUS login is on. SSH is shown with its port and addresses and does not fail. Each router also lists every service with its port, state, and allowed addresses. Fix uses the automation service account and writes only what differs. It does not turn off the plaintext API, and it does not change FTP or Winbox.</p>
   <form method="post" action="{{ url_for('compliance_check') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button type="submit">Check now</button>
@@ -30,6 +30,24 @@
         {% endfor %}
       </tbody>
     </table>
+    {% endif %}
+    {% if router.services %}
+    <h3 class="section">Services</h3>
+    <table>
+      <thead><tr><th>Service</th><th>Port</th><th>State</th><th>Allowed addresses</th></tr></thead>
+      <tbody>
+        {% for service in router.services %}
+        <tr>
+          <td>{{ service.name }}</td>
+          <td>{{ service.port }}</td>
+          <td>{{ service.state }}</td>
+          <td>{{ service.addresses or "any" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% if router.checks %}
     {% if router.passed < router.total %}
     <label class="choice"><input type="checkbox" name="router_ids" value="{{ router.id }}"> Fix {{ router.site_name }}</label>
     {% endif %}

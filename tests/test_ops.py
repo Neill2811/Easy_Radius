@@ -85,11 +85,14 @@ def test_compliance_score_and_fix_steps():
         def rows(self, path):
             if path == "/ip/service":
                 return [
-                    {"name": "telnet", "disabled": "false"},
-                    {"name": "ftp", "disabled": "true"},
-                    {"name": "www", "disabled": "false"},
-                    {"name": "api", "disabled": "false"},
-                    {"name": "api-ssl", "disabled": "false", "address": ""},
+                    {"name": "telnet", "port": "23", "disabled": "false"},
+                    {"name": "ftp", "port": "21", "disabled": "true", "address": "192.0.2.10/32"},
+                    {"name": "ssh", "port": "22", "disabled": "false", "address": ""},
+                    {"name": "winbox", "port": "8291", "disabled": "false", "address": ""},
+                    {"name": "www", "port": "80", "disabled": "false"},
+                    {"name": "www-ssl", "port": "443", "disabled": "true"},
+                    {"name": "api", "port": "8728", "disabled": "false"},
+                    {"name": "api-ssl", "port": "8729", "disabled": "false", "address": ""},
                 ]
             if path == "/user":
                 return [{"name": "admin", "disabled": "false"}]
@@ -100,50 +103,328 @@ def test_compliance_score_and_fix_steps():
                 return {"enabled": "false", "servers": ""}
             if path == "/user/aaa":
                 return {"use-radius": "no"}
+            if path == "/snmp":
+                return {"enabled": "no"}
             rows = self.rows(path)
             return rows[0] if rows else {}
 
     checks = evaluate(Router())
     passed, total = score(checks)
-    assert total == 8
-    assert passed == 0  # ftp disabled is a failure; plaintext API is open
-    ftp = next(check for check in checks if check["id"] == "ftp")
-    assert ftp["title"] == "FTP is on and restricted"
-    assert ftp["passed"] is False
-    assert ftp["detail"] == "disabled"
-    api = next(check for check in checks if check["id"] == "api")
-    assert api["passed"] is False
-    assert api["detail"] == "enabled, open to any address"
+    assert total == 12
+    by_id = {check["id"]: check for check in checks}
+    assert by_id["ftp"]["passed"] is False
+    assert by_id["ftp"]["detail"] == "disabled on port 21"
+    assert by_id["telnet"]["detail"] == "enabled on port 23, open to any address"
+    assert by_id["www"]["title"] == "www is off"
+    assert by_id["www"]["passed"] is False
+    assert by_id["www-ssl"]["title"] == "www-ssl is off"
+    assert by_id["www-ssl"]["passed"] is True
+    assert by_id["www-ssl"]["detail"] == "disabled on port 443"
+    assert by_id["ssh"]["passed"] is True
+    assert by_id["ssh"]["detail"] == "enabled on port 22, open to any address"
+    assert by_id["winbox"]["passed"] is False
+    assert by_id["winbox"]["detail"] == "enabled on port 8291, open to any address"
+    assert by_id["api"]["detail"] == "enabled on port 8728, open to any address"
+    assert by_id["api-ssl"]["detail"] == "enabled on port 8729, open to any address"
+    assert by_id["snmp"]["passed"] is True
+    assert passed == 3  # www-ssl is off, SSH is report-only, SNMP has no communities
     template = fix_template("192.0.2.1")
     paths = [(step.path, step.where, step.values) for step in template.steps]
     assert ("/ip/service", {"name": "telnet"}, {"disabled": "yes"}) in paths
-    assert not any(step.where.get("name") == "api" for step in template.steps)
-    assert not any(step.where.get("name") == "ftp" for step in template.steps)
+    assert ("/ip/service", {"name": "www"}, {"disabled": "yes"}) in paths
+    assert ("/ip/service", {"name": "www-ssl"}, {"disabled": "yes"}) in paths
+    assert not any(step.where.get("name") in {"api", "ftp", "winbox", "ssh"} for step in template.steps)
     assert any(step.where.get("name") == "api-ssl" and step.values["address"] == "192.0.2.1/32" for step in template.steps)
 
 
 def test_ftp_passes_only_when_enabled_and_restricted():
     from easy_radius.compliance import _ftp
 
-    assert _ftp({"name": "ftp", "disabled": "true", "address": "192.0.2.10/32"}) == (False, "disabled")
-    assert _ftp(None) == (False, "disabled")
-    limited = _ftp({"name": "ftp", "disabled": "false", "address": "192.0.2.10/32,198.51.100.5/32"})
-    assert limited == (True, "enabled, restricted to 192.0.2.10/32,198.51.100.5/32")
-    assert _ftp({"name": "ftp", "disabled": "no", "address": "0.0.0.0/0"}) == (False, "enabled, open to any address")
-    assert _ftp({"name": "ftp", "disabled": "false", "address": ""}) == (False, "enabled, open to any address")
-    assert _ftp({"name": "ftp", "disabled": "no", "address": "::/0"}) == (False, "enabled, open to any address")
+    assert _ftp({"name": "ftp", "port": "21", "disabled": "true", "address": "192.0.2.10/32"}) == (
+        False,
+        "disabled on port 21",
+    )
+    assert _ftp(None) == (False, "not present")
+    limited = _ftp(
+        {"name": "ftp", "port": "21", "disabled": "false", "address": "192.0.2.10/32,198.51.100.5/32"}
+    )
+    assert limited == (True, "enabled on port 21, restricted to 192.0.2.10/32,198.51.100.5/32")
+    assert _ftp({"name": "ftp", "port": "21", "disabled": "no", "address": "0.0.0.0/0"}) == (
+        False,
+        "enabled on port 21, open to any address",
+    )
+    assert _ftp({"name": "ftp", "port": "21", "disabled": "false", "address": ""}) == (
+        False,
+        "enabled on port 21, open to any address",
+    )
+    assert _ftp({"name": "ftp", "port": "21", "disabled": "no", "address": "::/0"}) == (
+        False,
+        "enabled on port 21, open to any address",
+    )
     assert not any(step.where.get("name") == "ftp" for step in fix_template("").steps)
+
+
+def test_winbox_fails_only_when_enabled_with_no_addresses():
+    from easy_radius.compliance import _winbox
+
+    assert _winbox({"name": "winbox", "port": "8291", "disabled": "true", "address": ""}) == (
+        True,
+        "disabled on port 8291",
+    )
+    assert _winbox(None) == (True, "not present")
+    limited = _winbox({"name": "winbox", "port": "8291", "disabled": "false", "address": "192.0.2.0/24"})
+    assert limited == (True, "enabled on port 8291, restricted to 192.0.2.0/24")
+    assert _winbox({"name": "winbox", "port": "8291", "disabled": "no", "address": ""}) == (
+        False,
+        "enabled on port 8291, open to any address",
+    )
+    assert _winbox({"name": "winbox", "port": "8291", "disabled": "false", "address": "0.0.0.0/0"}) == (
+        False,
+        "enabled on port 8291, open to any address",
+    )
+    assert _winbox({"name": "winbox", "port": "8291", "disabled": "false", "address": "::/0"}) == (
+        False,
+        "enabled on port 8291, open to any address",
+    )
+    assert not any(step.where.get("name") == "winbox" for step in fix_template("192.0.2.1").steps)
+
+
+def test_snmp_lists_communities_without_secrets_and_fails_public_or_open_write():
+    from easy_radius.compliance import _snmp
+
+    secret = "example-community-secret"
+    privacy = "example-privacy-value"
+
+    class Router:
+        def __init__(self, communities, enabled="yes"):
+            self.communities = communities
+            self.enabled = enabled
+
+        def get(self, path):
+            if path == "/snmp":
+                return {"enabled": self.enabled}
+            return {}
+
+        def rows(self, path):
+            if path == "/snmp/community":
+                return self.communities
+            return []
+
+    safe = Router(
+        [
+            {
+                "name": "monitor",
+                "addresses": "192.0.2.10/32",
+                "read-access": "yes",
+                "write-access": "no",
+                "security": "none",
+                "authentication-password": secret,
+                "encryption-password": privacy,
+            }
+        ]
+    )
+    passed, detail = _snmp(safe)
+    assert passed is True
+    assert detail == "SNMP enabled; monitor (enabled, 192.0.2.10/32, read, security none)"
+    assert secret not in detail
+    assert privacy not in detail
+
+    public = Router(
+        [
+            {
+                "name": "public",
+                "address": "192.0.2.10/32",
+                "read-access": "yes",
+                "write-access": "no",
+                "security": "none",
+                "disabled": "false",
+            }
+        ]
+    )
+    passed, detail = _snmp(public)
+    assert passed is False
+    assert "public community is enabled" in detail
+    assert secret not in detail
+
+    disabled_public = Router(
+        [
+            {
+                "name": "public",
+                "address": "",
+                "read-access": "yes",
+                "write-access": "yes",
+                "security": "none",
+                "disabled": "yes",
+                "authentication-password": secret,
+            }
+        ],
+        enabled="no",
+    )
+    passed, detail = _snmp(disabled_public)
+    assert passed is True
+    assert "SNMP disabled" in detail
+    assert secret not in detail
+
+    open_write = Router(
+        [
+            {
+                "name": "ops",
+                "address": "0.0.0.0/0",
+                "read-access": "yes",
+                "write-access": "yes",
+                "security": "private",
+                "disabled": "no",
+                "authentication-password": secret,
+            }
+        ]
+    )
+    passed, detail = _snmp(open_write)
+    assert passed is False
+    assert "ops has write access with no address restriction" in detail
+    assert "read-write" in detail
+    assert "security private" in detail
+    assert secret not in detail
+
+    limited_write = Router(
+        [
+            {
+                "name": "ops",
+                "addresses": "198.51.100.5/32",
+                "read-access": "yes",
+                "write-access": "true",
+                "security": "authorized",
+                "disabled": "false",
+            }
+        ]
+    )
+    passed, detail = _snmp(limited_write)
+    assert passed is True
+    assert "198.51.100.5/32" in detail
+    assert "read-write" in detail
+
+
+def test_service_summary_lists_every_service():
+    from easy_radius.compliance import service_summary
+
+    class Router:
+        def rows(self, path):
+            if path == "/ip/service":
+                return [
+                    {"name": "ssh", "port": "22", "disabled": "false", "address": ""},
+                    {"name": "winbox", "port": "8291", "disabled": "no", "address": "192.0.2.0/24"},
+                    {"name": "ftp", "port": "21", "disabled": "yes", "address": "192.0.2.10/32"},
+                ]
+            return []
+
+    summary = service_summary(Router())
+    assert summary == [
+        {"name": "ssh", "port": "22", "state": "enabled", "addresses": ""},
+        {"name": "winbox", "port": "8291", "state": "enabled", "addresses": "192.0.2.0/24"},
+        {"name": "ftp", "port": "21", "state": "disabled", "addresses": "192.0.2.10/32"},
+    ]
 
 
 def test_plaintext_api_passes_when_disabled_or_limited_to_addresses():
     from easy_radius.compliance import _plaintext_api
 
-    assert _plaintext_api({"name": "api", "disabled": "true", "address": ""}) == (True, "disabled")
-    assert _plaintext_api(None) == (True, "disabled")
-    limited = _plaintext_api({"name": "api", "disabled": "false", "address": "192.0.2.10/32,198.51.100.5/32"})
-    assert limited == (True, "enabled, restricted to 192.0.2.10/32,198.51.100.5/32")
-    assert _plaintext_api({"name": "api", "disabled": "no", "address": "0.0.0.0/0"}) == (False, "enabled, open to any address")
-    assert _plaintext_api({"name": "api", "disabled": "false", "address": ""}) == (False, "enabled, open to any address")
+    assert _plaintext_api({"name": "api", "port": "8728", "disabled": "true", "address": ""}) == (
+        True,
+        "disabled on port 8728",
+    )
+    assert _plaintext_api(None) == (True, "not present")
+    limited = _plaintext_api(
+        {"name": "api", "port": "8728", "disabled": "false", "address": "192.0.2.10/32,198.51.100.5/32"}
+    )
+    assert limited == (True, "enabled on port 8728, restricted to 192.0.2.10/32,198.51.100.5/32")
+    assert _plaintext_api({"name": "api", "port": "8728", "disabled": "no", "address": "0.0.0.0/0"}) == (
+        False,
+        "enabled on port 8728, open to any address",
+    )
+    assert _plaintext_api({"name": "api", "port": "8728", "disabled": "false", "address": ""}) == (
+        False,
+        "enabled on port 8728, open to any address",
+    )
+
+
+def test_compliance_page_lists_services_and_hides_community_secrets(tmp_path):
+    secret = "example-community-secret"
+    data = tmp_path / "data"
+    prepare_state(data, admin_password=PASSWORD)
+    state = load_state(data)
+    state["routers"] = [
+        {"id": "r1", "site_name": "ExampleSite", "ip": "192.0.2.10", "enabled": True, "api_plaintext": False}
+    ]
+    from easy_radius.automation import automation_key, encrypt_secret
+
+    key = automation_key(state)
+    state["automation_account"] = {
+        "user_id": "u1",
+        "username": "radius-auto",
+        "password_enc": encrypt_secret(key, PASSWORD),
+    }
+    save_state(data, state)
+
+    class Session:
+        def rows(self, path):
+            if path == "/ip/service":
+                return [
+                    {"name": "winbox", "port": "8291", "disabled": "false", "address": "192.0.2.0/24"},
+                    {"name": "www", "port": "80", "disabled": "true"},
+                    {"name": "www-ssl", "port": "443", "disabled": "false"},
+                    {"name": "ssh", "port": "22", "disabled": "false", "address": "192.0.2.10/32"},
+                ]
+            if path == "/user":
+                return [{"name": "admin", "disabled": "yes"}]
+            if path == "/snmp/community":
+                return [
+                    {
+                        "name": "monitor",
+                        "addresses": "192.0.2.10/32",
+                        "read-access": "yes",
+                        "write-access": "no",
+                        "security": "none",
+                        "authentication-password": secret,
+                    }
+                ]
+            return []
+
+        def get(self, path):
+            if path == "/system/ntp/client":
+                return {"enabled": "true", "servers": "192.0.2.53"}
+            if path == "/user/aaa":
+                return {"use-radius": "yes"}
+            if path == "/snmp":
+                return {"enabled": "yes"}
+            return {}
+
+        def close(self):
+            pass
+
+    def connector(host, username, password, allow_plaintext=False):
+        assert password == PASSWORD
+        return Session()
+
+    app = create_app(data_dir=data, runner=lambda args, timeout=120: None)
+    app.config["TESTING"] = True
+    app.config["ROUTER_CONNECT"] = connector
+    client = app.test_client()
+    page = client.get("/login")
+    token = re.search(r'name="csrf_token" value="([^"]+)"', page.get_data(as_text=True)).group(1)
+    client.post("/login", data={"username": "neill", "password": PASSWORD, "csrf_token": token})
+    page = client.get("/compliance")
+    token = re.search(r'name="csrf_token" value="([^"]+)"', page.get_data(as_text=True)).group(1)
+    checked = client.post("/compliance/check", data={"csrf_token": token}, follow_redirects=True)
+    body = checked.get_data(as_text=True)
+    assert "enabled on port 8291, restricted to 192.0.2.0/24" in body
+    assert "www is off" in body
+    assert "www-ssl is off" in body
+    assert "Services" in body
+    assert "winbox" in body
+    assert "8291" in body
+    assert "monitor" in body
+    assert "192.0.2.10/32" in body
+    assert secret not in body
+    assert PASSWORD not in body
 
 
 def test_backup_page_requires_login_and_schedule_saves(tmp_path):
