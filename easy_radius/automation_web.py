@@ -253,7 +253,10 @@ def register_automation(app) -> None:
             connector = connect_router
 
         def on_finished(finished: dict) -> None:
+            from easy_radius.automation import note_touches
+
             current = load_state(data_dir)
+            note_touches(current, finished)
             finish_audit(current, finished)
             save_state(data_dir, current)
 
@@ -335,6 +338,11 @@ def register_automation(app) -> None:
                     session.close()
                 except Exception:
                     pass
+        from datetime import datetime, timezone
+
+        touches = dict(state.get("router_touches") or {})
+        touches[str(router_id)] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        state["router_touches"] = touches
         record(state, "automation", f"Restored the saved export on {router['site_name']} ({router['ip']})")
         save_state(data_dir, state)
         flash(f"Sent the saved export to {router['site_name']}. A normal export hides secrets, so those values were not restored.", "ok")

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Backup diff · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ router.site_name }}</h1>
+  <a href="{{ url_for('config_backups') }}">Back to backups</a>
+</div>
+<div class="card">
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="get">
+    <label for="left">Older</label>
+    <select id="left" name="left">
+      {% for stamp in versions %}
+      <option value="{{ stamp }}" {% if stamp == left %}selected{% endif %}>{{ stamp }}</option>
+      {% endfor %}
+    </select>
+    <label for="right">Newer</label>
+    <select id="right" name="right">
+      {% for stamp in versions %}
+      <option value="{{ stamp }}" {% if stamp == right %}selected{% endif %}>{{ stamp }}</option>
+      {% endfor %}
+    </select>
+    <button class="secondary" type="submit">Show diff</button>
+  </form>
+  <pre class="output">{{ diff }}</pre>
+</div>
+{% endblock %}

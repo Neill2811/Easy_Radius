@@ -207,7 +207,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
     def router_new():
         return render_template(
             "router_form.html",
-            router={"site_name": "", "ip": "", "secret": secrets.token_hex(16), "tags": []},
+            router={"site_name": "", "ip": "", "secret": secrets.token_hex(16), "tags": [], "api_plaintext": False},
             error=None,
             title="Add router",
         )
@@ -223,7 +223,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         if error:
             return render_template(
                 "router_form.html",
-                router={"site_name": site_name.strip(), "ip": ip_text.strip(), "secret": secret, "tags": tags},
+                router={"site_name": site_name.strip(), "ip": ip_text.strip(), "secret": secret, "tags": tags, "api_plaintext": request.form.get("api_plaintext") == "yes"},
                 error=error,
                 title="Add router",
             ), 400
@@ -239,6 +239,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
                 "client_name": sanitise_client_name(site, ip, taken),
                 "enabled": True,
                 "tags": tags,
+                "api_plaintext": request.form.get("api_plaintext") == "yes",
             }
         )
         record(state, "router.add", f"Added {site} ({ip})")
@@ -273,6 +274,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
                 "secret": secret,
                 "enabled": router.get("enabled", True),
                 "tags": tags,
+                "api_plaintext": request.form.get("api_plaintext") == "yes",
             }
             return render_template("router_form.html", router=posted, error=error, title="Edit router"), 400
         taken = {item["client_name"] for item in state["routers"] if item["id"] != router_id}
@@ -281,6 +283,7 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         router["ip"] = ip
         router["secret"] = secret
         router["tags"] = tags
+        router["api_plaintext"] = request.form.get("api_plaintext") == "yes"
         router["client_name"] = sanitise_client_name(router["site_name"], ip, taken)
         record(state, "router.edit", f"Updated {router['site_name']} ({ip})")
         save_state(app.config["DATA_DIR"], state)
@@ -759,8 +762,10 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         return redirect(url_for("security"))
 
     from easy_radius.automation_web import register_automation
+    from easy_radius.ops_web import register_ops
 
     register_automation(app)
+    register_ops(app)
     return app
 
 

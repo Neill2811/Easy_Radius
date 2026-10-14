@@ -126,7 +126,7 @@ def test_ssl_port_is_preferred_and_plaintext_is_the_fallback(monkeypatch):
         return Dummy()
 
     monkeypatch.setattr("librouteros.connect", fake_connect)
-    session = connect_router("192.0.2.10", "radius-auto", PASSWORD)
+    session = connect_router("192.0.2.10", "radius-auto", PASSWORD, allow_plaintext=True)
     assert session.port == 8728
     assert calls[0]["port"] == 8729
     assert calls[0]["ssl_wrapper"] is not None
@@ -142,6 +142,19 @@ def test_ssl_port_is_preferred_and_plaintext_is_the_fallback(monkeypatch):
     monkeypatch.setattr("librouteros.connect", ssl_ok)
     assert connect_router("192.0.2.10", "radius-auto", PASSWORD).port == 8729
     assert len(calls) == 1
+
+    calls.clear()
+
+    def refuse(**kwargs):
+        calls.append(kwargs["port"])
+        raise OSError("closed")
+
+    monkeypatch.setattr("librouteros.connect", refuse)
+    try:
+        connect_router("192.0.2.10", "radius-auto", PASSWORD)
+    except Exception:
+        pass
+    assert calls == [8729]
 
     def both_fail(**kwargs):
         raise OSError(f"bad {kwargs['password']}")

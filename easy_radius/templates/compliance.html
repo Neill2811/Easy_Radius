@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Compliance · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Compliance</h1>
+</div>
+<div class="card">
+  <p class="help">Checks telnet, ftp, and www are off, the default admin cannot log in, NTP is set, api-ssl is limited to an address, plaintext API is off, and RADIUS login is on. Fix uses the automation service account and writes only what differs.</p>
+  <form method="post" action="{{ url_for('compliance_check') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Check now</button>
+  </form>
+  {% if report %}
+  <p class="help">Last check {{ report.at }}</p>
+  <form method="post" action="{{ url_for('compliance_fix') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% for router in report.routers %}
+    <h2 class="section">{{ router.site_name }} <span class="help">{{ router.passed }}/{{ router.total }}</span></h2>
+    {% if router.error %}<p class="error">{{ router.error }}</p>{% endif %}
+    {% if router.checks %}
+    <table>
+      <thead><tr><th>Check</th><th>Result</th><th>Detail</th></tr></thead>
+      <tbody>
+        {% for check in router.checks %}
+        <tr>
+          <td>{{ check.title }}</td>
+          <td><span class="status {{ 'up' if check.passed else 'down' }}">{{ 'Pass' if check.passed else 'Fail' }}</span></td>
+          <td>{{ check.detail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if router.passed < router.total %}
+    <label class="choice"><input type="checkbox" name="router_ids" value="{{ router.id }}"> Fix {{ router.site_name }}</label>
+    {% endif %}
+    {% endif %}
+    {% endfor %}
+    <label class="choice"><input type="checkbox" name="confirm_many" value="yes"> I confirm a fix on every ticked router.</label>
+    <button type="submit">Fix ticked routers</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}
