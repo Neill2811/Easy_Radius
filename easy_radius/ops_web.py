@@ -10,7 +10,7 @@ from flask import abort, flash, redirect, render_template, request, url_for
 
 from easy_radius.audit import record
 from easy_radius.automation import AutomationError, launch_run, new_run_id, save_run
-from easy_radius.compliance import evaluate, fix_template, score
+from easy_radius.compliance import evaluate, fix_template, score, service_summary
 from easy_radius.config_backups import (
     backup_due,
     complete_backup,
@@ -140,12 +140,13 @@ def register_ops(app) -> None:
             try:
                 session = _open(connector, router, username, password)
             except Exception as exc:
-                rows.append({"id": router["id"], "site_name": router["site_name"], "ip": router["ip"], "error": _scrub(str(exc), password), "checks": [], "passed": 0, "total": 0})
+                rows.append({"id": router["id"], "site_name": router["site_name"], "ip": router["ip"], "error": _scrub(str(exc), password), "checks": [], "services": [], "passed": 0, "total": 0})
                 continue
             try:
                 checks = evaluate(session, state.get("radius_server_address") or "")
+                services = service_summary(session)
             except Exception as exc:
-                rows.append({"id": router["id"], "site_name": router["site_name"], "ip": router["ip"], "error": _scrub(str(exc), password), "checks": [], "passed": 0, "total": 0})
+                rows.append({"id": router["id"], "site_name": router["site_name"], "ip": router["ip"], "error": _scrub(str(exc), password), "checks": [], "services": [], "passed": 0, "total": 0})
                 continue
             finally:
                 if getattr(session, "close", None):
@@ -154,7 +155,7 @@ def register_ops(app) -> None:
                     except Exception:
                         pass
             passed, total = score(checks)
-            rows.append({"id": router["id"], "site_name": router["site_name"], "ip": router["ip"], "error": "", "checks": checks, "passed": passed, "total": total})
+            rows.append({"id": router["id"], "site_name": router["site_name"], "ip": router["ip"], "error": "", "checks": checks, "services": services, "passed": passed, "total": total})
         state["last_compliance"] = {"at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "routers": rows}
         record(state, "compliance", "Checked router compliance")
         save_state(data_dir, state)
