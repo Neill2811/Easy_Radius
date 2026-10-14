@@ -143,3 +143,68 @@ def test_login_csrf_and_router_user_flow(tmp_path):
     assert "Access-Accept" in test_body
     assert "example-localhost-secret" not in test_body
     assert any(call[0] == "radtest" and call[-1] == "example-localhost-secret" for call in runner.calls)
+
+
+def test_sidebar_lists_every_page_and_attention_marks(tmp_path):
+    from easy_radius.nav import failing_routers, monitoring_attention
+    from easy_radius.store import load_state, save_state
+
+    app, _runner = _app(tmp_path)
+    client = app.test_client()
+    login = client.get("/login")
+    assert "side-nav" not in login.get_data(as_text=True)
+    assert "signal-bg" in login.get_data(as_text=True)
+    token = _csrf(login.get_data(as_text=True))
+    client.post("/login", data={"username": "neill", "password": "example-password", "csrf_token": token})
+
+    data = tmp_path / "data"
+    state = load_state(data)
+    state["last_compliance"] = {
+        "at": "2026-10-14T00:00:00Z",
+        "routers": [
+            {"id": "ok", "passed": 8, "total": 8, "error": ""},
+            {"id": "bad", "passed": 3, "total": 8, "error": ""},
+            {"id": "down", "passed": 0, "total": 0, "error": "connection refused"},
+        ],
+    }
+    state["monitor_alerts"] = [{"kind": "down", "router_id": "bad", "detail": "No recent RADIUS packet"}]
+    save_state(data, state)
+    assert failing_routers(state) == 2
+    assert monitoring_attention(state) is True
+    assert monitoring_attention({"monitor_alerts": []}) is False
+
+    page = client.get("/compliance")
+    body = page.get_data(as_text=True)
+    for label in (
+        "Dashboard",
+        "Users",
+        "Routers",
+        "Temporary access",
+        "Test login",
+        "Apply",
+        "Automation",
+        "Backups",
+        "Firmware",
+        "Compliance",
+        "Monitoring",
+        "Logins",
+        "Sessions",
+        "Inventory",
+        "Reports",
+        "History",
+        "Admin password",
+        "2FA",
+        "Easy Radius backup",
+        "Log out",
+    ):
+        assert label in body
+    assert 'href="/compliance"' in body
+    assert 'aria-current="page"' in body
+    assert "nav-badge" in body
+    assert ">2<" in body
+    assert "nav-dot" in body
+    assert "is-active" in body
+    routers = client.get("/routers")
+    routers_body = routers.get_data(as_text=True)
+    assert 'href="/routers"' in routers_body
+    assert "aria-current=\"page\"" in routers_body

@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Dashboard</h1>
+    <p class="help">Times are South African Standard Time. This page reads saved data and logs. It does not contact the routers.</p>
+  </div>
+</div>
+<div class="stat-grid">
+  <a class="card stat-card" href="{{ url_for('routers') }}">
+    <div class="stat-label">Routers</div>
+    {% if dash.routers.empty %}
+    <div class="stat-value">None yet</div>
+    <p class="stat-note">Add a router to see which ones are up.</p>
+    {% else %}
+    <div class="stat-value">{{ dash.routers.up }} up <span class="stat-quiet">/ {{ dash.routers.down }} down</span></div>
+    {% if dash.routers.unseen %}<p class="stat-note">{{ dash.routers.unseen }} not seen yet. A router is down only after a packet, then silence.</p>{% endif %}
+    {% endif %}
+  </a>
+  <a class="card stat-card" href="{{ url_for('compliance') }}">
+    <div class="stat-label">Compliance</div>
+    {% if dash.compliance.known %}
+    <div class="stat-value">{{ dash.compliance.compliant }} of {{ dash.compliance.total }}</div>
+    <p class="stat-note">compliant</p>
+    {% else %}
+    <div class="stat-value">Not checked</div>
+    <p class="stat-note">Run a compliance check to fill this in.</p>
+    {% endif %}
+  </a>
+  <a class="card stat-card" href="{{ url_for('config_backups') }}">
+    <div class="stat-label">Last config backup</div>
+    {% if dash.backup.known %}
+    <div class="stat-value">{{ dash.backup.ok }} ok <span class="stat-quiet">/ {{ dash.backup.failed }} failed</span></div>
+    <p class="stat-note">{{ dash.backup.when }}{% if dash.backup.error %} · {{ dash.backup.error }}{% endif %}</p>
+    {% else %}
+    <div class="stat-value">None yet</div>
+    <p class="stat-note">No config backup has been saved.</p>
+    {% endif %}
+  </a>
+  <a class="card stat-card" href="{{ url_for('monitoring') }}">
+    <div class="stat-label">Active alerts</div>
+    {% if dash.alerts.count %}
+    <div class="stat-value">{{ dash.alerts.count }}</div>
+    <p class="stat-note">{{ dash.alerts['items'][0].detail }}</p>
+    {% else %}
+    <div class="stat-value">None</div>
+    <p class="stat-note">No stored monitoring alert.</p>
+    {% endif %}
+  </a>
+</div>
+<div class="dash-split">
+  <div class="card">
+    <h2>Needs attention</h2>
+    {% if dash.attention %}
+    <ul class="attention">
+      {% for item in dash.attention %}
+      <li><a href="{{ url_for(item.endpoint) }}">{{ item.title }}</a> <span class="stat-note">{{ item.reason }}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">Nothing needs attention.</p>
+    {% endif %}
+  </div>
+  <div class="card">
+    <h2>Logins, last 24 hours</h2>
+    <p><strong>{{ dash.logins.accept }}</strong> accepted · <strong>{{ dash.logins.reject }}</strong> rejected</p>
+    {% if dash.logins.empty %}
+    <p class="empty">No logins in the last 24 hours.</p>
+    {% else %}
+    <svg class="hour-chart" viewBox="0 0 288 78" role="img" aria-label="Accepted and rejected logins by hour, South African Standard Time">
+      {% for bar in dash.logins.hours %}
+      <rect class="bar-reject" x="{{ loop.index0 * 12 }}" y="{{ 52 - bar.reject_h }}" width="5" height="{{ bar.reject_h }}"/>
+      <rect class="bar-accept" x="{{ loop.index0 * 12 + 5 }}" y="{{ 52 - bar.accept_h }}" width="5" height="{{ bar.accept_h }}"/>
+      {% if bar.label %}<text class="hour-label" x="{{ loop.index0 * 12 }}" y="70">{{ bar.label }}</text>{% endif %}
+      {% endfor %}
+    </svg>
+    <p class="stat-note">Green is accepted, red is rejected. Hours are SAST.</p>
+    {% endif %}
+    {% if dash.logins.bursts %}
+    <ul class="attention">
+      {% for burst in dash.logins.bursts %}
+      <li class="burst">{{ burst.count }} rejected {% if burst.kind == 'user' %}for {{ burst.label }}{% else %}from {{ burst.label }}{% endif %} in {{ dash.logins.burst_window }} minutes</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+</div>
+<div class="dash-split">
+  <div class="card">
+    <h2>Recent activity</h2>
+    {% if dash.activity %}
+    <ul class="attention">
+      {% for event in dash.activity %}
+      <li><a href="{{ url_for('history') }}">{{ event.detail }}</a> <span class="stat-note">{{ event.actor }} · {{ event.when }}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">No history yet.</p>
+    {% endif %}
+  </div>
+  <div class="card">
+    <h2>Temporary access</h2>
+    {% if dash.grants %}
+    <ul class="attention">
+      {% for grant in dash.grants %}
+      <li><a href="{{ url_for('grants') }}">{{ grant.username }}</a> <span class="stat-note">{{ grant.what }} until {{ grant.until }}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">No temporary access is active.</p>
+    {% endif %}
+  </div>
+</div>
+<div class="dash-split">
+  <div class="card">
+    <h2><a href="{{ url_for('firmware') }}">Firmware</a></h2>
+    {% if dash.firmware.empty %}
+    <p class="empty">No routers yet.</p>
+    {% else %}
+    <p class="stat-note">{{ dash.firmware.behind }} behind their channel. {{ dash.firmware.unknown }} with an unknown version or channel.</p>
+    <table>
+      <thead><tr><th>Version</th><th>Channel</th><th>Routers</th></tr></thead>
+      <tbody>
+        {% for row in dash.firmware.rows %}
+        <tr>
+          <td>{{ row.version }}</td>
+          <td>{{ row.channel }}</td>
+          <td>{{ row.count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+  <div class="card">
+    <h2>Server</h2>
+    <p>FreeRADIUS <strong>{{ dash.server.freeradius }}</strong></p>
+    <p>Data directory <strong>{{ dash.server.disk }}</strong></p>
+    <p>Last Easy Radius backup
+      {% if dash.server.backup %}
+      <a href="{{ url_for('backup_page') }}"><strong>{{ dash.server.backup }}</strong></a>
+      {% else %}
+      <strong>none yet</strong>
+      {% endif %}
+    </p>
+  </div>
+</div>
+{% endblock %}

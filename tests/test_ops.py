@@ -462,8 +462,8 @@ def test_compliance_page_keeps_check_details_without_a_service_table(tmp_path):
     assert "1 of 2 routers compliant" in body
     assert "12/12" in body
     assert body.index("ExampleSite") < body.index("Example North")
-    assert "<details" in body
-    assert re.search(r"<details\b[^>]*\bopen\b", body) is None
+    assert '<details class="router-row">' in body
+    assert re.search(r'<details class="router-row"[^>]*\bopen\b', body) is None
     assert "enabled on port 8291, restricted to 192.0.2.0/24" in body
     assert "Winbox is off or restricted" in body
     assert "www is off" in body

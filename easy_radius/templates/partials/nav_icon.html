@@ -1,0 +1,39 @@
+<svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+  {% if item.icon == 'home' %}
+  <path d="M4 11.5 12 4l8 7.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-8.5z"/>
+  {% elif item.icon == 'users' %}
+  <path d="M8 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3.5 19c.4-2.2 2.2-3.5 4.5-3.5s4.1 1.3 4.5 3.5M16 13a2.5 2.5 0 1 0 0-5M16.2 15.6c1.6.3 2.8 1.4 3.3 3.4"/>
+  {% elif item.icon == 'routers' %}
+  <path d="M12 16.5v2.5M8.5 19h7M7 8.5a7 7 0 0 1 10 0M9.2 11a4 4 0 0 1 5.6 0M12 14.2h.01"/>
+  {% elif item.icon == 'clock' %}
+  <circle cx="12" cy="12" r="8"/><path d="M12 8v4.5l3 2"/>
+  {% elif item.icon == 'play' %}
+  <path d="M8 6.5v11l9-5.5-9-5.5z"/>
+  {% elif item.icon == 'check' %}
+  <path d="M5 12.5 9.5 17 19 7"/>
+  {% elif item.icon == 'bolt' %}
+  <path d="M13 3 5 13h6l-1 8 8-11h-6l1-7z"/>
+  {% elif item.icon == 'archive' %}
+  <path d="M4 7h16v12H4zM4 7l2-3h12l2 3M10 12h4"/>
+  {% elif item.icon == 'chip' %}
+  <path d="M8 8h8v8H8zM9 4v4M12 4v4M15 4v4M9 16v4M12 16v4M15 16v4M4 9h4M4 12h4M4 15h4M16 9h4M16 12h4M16 15h4"/>
+  {% elif item.icon == 'shield' %}
+  <path d="M12 3 5 6v6c0 4 2.8 6.6 7 8 4.2-1.4 7-4 7-8V6l-7-3z"/>
+  {% elif item.icon == 'pulse' %}
+  <path d="M3 12h4l2-5 4 10 2-5h6"/>
+  {% elif item.icon == 'list' %}
+  <path d="M8 7h12M8 12h12M8 17h12M4 7h.01M4 12h.01M4 17h.01"/>
+  {% elif item.icon == 'sessions' %}
+  <path d="M8 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM4 19c.4-2 2-3.2 4-3.2M15 8v3l2 1M15 5a6 6 0 1 1 0 12"/>
+  {% elif item.icon == 'grid' %}
+  <path d="M5 5h6v6H5zM13 5h6v6h-6zM5 13h6v6H5zM13 13h6v6h-6z"/>
+  {% elif item.icon == 'file' %}
+  <path d="M7 3h7l5 5v13H7zM14 3v5h5M9 13h6M9 17h6"/>
+  {% elif item.icon == 'history' %}
+  <path d="M4 12a8 8 0 1 0 2.2-5.5M4 4v4h4M12 8v4.5l3 2"/>
+  {% elif item.icon == 'lock' %}
+  <path d="M8 11V8a4 4 0 0 1 8 0v3M6 11h12v9H6z"/>
+  {% elif item.icon == 'download' %}
+  <path d="M12 4v10M8 10l4 4 4-4M5 19h14"/>
+  {% endif %}
+</svg>
