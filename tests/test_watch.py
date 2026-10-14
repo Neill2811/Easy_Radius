@@ -57,7 +57,7 @@ def test_temporary_access_is_in_the_policy_until_it_expires(tmp_path):
         "group": "read",
     }
     routers = [{"id": "r1", "site_name": "ExampleSite", "ip": "192.0.2.10", "enabled": True, "secret": "example-router-secret"}]
-    now = datetime(2026, 10, 14, 12, tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc).replace(microsecond=0)
     grants = [
         {
             "id": "g1",
