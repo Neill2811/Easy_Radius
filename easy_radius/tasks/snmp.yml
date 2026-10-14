@@ -1,0 +1,10 @@
+name: Set SNMP
+variables:
+  contact: "admin@example.com"
+  location: "ExampleSite"
+steps:
+  - path: /snmp
+    set:
+      enabled: "yes"
+      contact: "{{ contact }}"
+      location: "{{ location }}"

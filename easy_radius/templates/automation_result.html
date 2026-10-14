@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ run.task_name }} · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ run.task_name }}</h1>
+  <a href="{{ url_for('automation') }}">Back to automation</a>
+</div>
+<div class="card">
+  <p>{{ run.at }} by {{ run.actor }}. {% if run.mode == 'check' %}Dry run.{% else %}Run.{% endif %} Status: <strong>{{ run.status }}</strong>. {{ run.batch }} at a time.</p>
+  {% if run.note %}<p class="error">{{ run.note }}</p>{% endif %}
+  <table>
+    <thead><tr><th>Router</th><th>Result</th><th>Output</th></tr></thead>
+    <tbody>
+      {% for router in run.routers %}
+      <tr>
+        <td data-label="Router">{{ router.site_name }}<br><span class="help">{{ router.ip }}</span></td>
+        <td data-label="Result"><span class="status {{ 'up' if router.status in ['ok', 'changed'] else 'down' }}">{% if run.mode == 'check' and router.status == 'changed' %}would change{% else %}{{ router.status }}{% endif %}</span></td>
+        <td data-label="Output">
+          <pre class="output">{{ router.output }}</pre>
+          {% if router.exported %}
+          <a href="{{ url_for('automation_export', run_id=run.id, router_id=router.id) }}">View /export</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if run.status == 'running' %}
+<script>setTimeout(() => location.reload(), 2000);</script>
+{% endif %}
+{% endblock %}

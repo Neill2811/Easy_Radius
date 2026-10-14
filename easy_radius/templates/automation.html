@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Automation · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Automation</h1>
+</div>
+<div class="card">
+  <h2>Service account</h2>
+  <p class="help">Ansible is not used. Easy Radius logs into each router with the RouterOS API as this RADIUS user. The password is encrypted in the data file and is not shown after you save it. Click Apply afterwards so FreeRADIUS learns the user. The router must already use RADIUS for logins, and api-ssl (port 8729) must allow this server. Port 8728 is only a fallback.</p>
+  {% if ready %}
+  <p>Saved account: <strong>{{ account.username }}</strong>. A password is stored. It is not shown.</p>
+  {% else %}
+  <p>No service account yet.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('automation_account') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="user_id">Use an existing user</label>
+    <select id="user_id" name="user_id">
+      <option value="">Create a new user instead</option>
+      {% for user in users %}
+      <option value="{{ user.id }}">{{ user.username }} ({{ user.group }})</option>
+      {% endfor %}
+    </select>
+    <label for="username">New username</label>
+    <input id="username" name="username" autocomplete="off" placeholder="radius-auto">
+    <label for="group">Group for a new user</label>
+    <select id="group" name="group">
+      <option value="write" selected>write</option>
+      <option value="full">full</option>
+    </select>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="new-password">
+    <p class="help">Leave this blank and use the generate button to create one. Either way, it is not shown again. If you pick an existing user, type the password again. The stored RADIUS hash cannot be read back.</p>
+    <button type="submit">Save account</button>
+    <button class="secondary" type="submit" name="generate" value="yes">Generate and save</button>
+  </form>
+</div>
+<div class="card">
+  <h2 class="section">Tasks</h2>
+  <p class="help">A task is a YAML or JSON list of RouterOS paths to set, with variables such as <code>{{ '{{ dns_servers }}' }}</code>. The router list and site groups on this page are the inventory. There is no separate inventory file.</p>
+  <p><a class="button" href="{{ url_for('automation_task_new') }}">New task</a></p>
+  <form method="post" action="{{ url_for('automation_task_upload') }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="task">Upload YAML or JSON</label>
+    <input id="task" name="task" type="file" accept=".yml,.yaml,.json,text/yaml,application/json">
+    <button class="secondary" type="submit">Upload</button>
+  </form>
+  {% if tasks %}
+  <table>
+    <thead>
+      <tr><th>Name</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for task in tasks %}
+      <tr>
+        <td data-label="Name">{{ task.name }}{% if task.builtin %} <span class="tag">example</span>{% endif %}</td>
+        <td data-label="Actions">
+          <div class="actions">
+            <a class="button secondary small" href="{{ url_for('automation_task_edit', task_id=task.id) }}">Edit</a>
+            <a class="button small" href="{{ url_for('automation_run_form', task_id=task.id) }}">Run</a>
+            <form method="post" action="{{ url_for('automation_task_delete', task_id=task.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="secondary small" type="submit">Delete</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% if runs %}
+<div class="card">
+  <h2 class="section">Recent runs</h2>
+  <table>
+    <thead><tr><th>When</th><th>Task</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for run in runs %}
+      <tr>
+        <td data-label="When"><a href="{{ url_for('automation_run_detail', run_id=run.id) }}">{{ run.at }}</a></td>
+        <td data-label="Task">{{ run.task_name }}</td>
+        <td data-label="Status">{{ run.status }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

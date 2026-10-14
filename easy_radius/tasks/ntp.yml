@@ -1,0 +1,8 @@
+name: Set NTP
+variables:
+  ntp_server: "192.0.2.123"
+steps:
+  - path: /system/ntp/client
+    set:
+      enabled: "yes"
+      servers: "{{ ntp_server }}"

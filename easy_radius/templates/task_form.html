@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ title }}</h1>
+  <a href="{{ url_for('automation') }}">Back to automation</a>
+</div>
+<div class="card">
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="name">Name</label>
+    <input id="name" name="name" value="{{ task.name }}">
+    <label for="body">Task</label>
+    <textarea id="body" name="body" required>{{ task.body }}</textarea>
+    <p class="help">Example: <code>/ip/dns set servers=192.0.2.53 allow-remote-requests=no</code></p>
+    <button type="submit">Save</button>
+  </form>
+</div>
+{% endblock %}

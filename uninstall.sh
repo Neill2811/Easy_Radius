@@ -41,6 +41,7 @@ cat <<EOF
 FreeRADIUS was not removed and /etc/freeradius was not changed.
 Backups made by install.sh are in /root/freeradius-backup-* .
 Apply backups are in $APP_DIR/data/backups/ .
+Automation exports are in $APP_DIR/data/automation/ .
 
 Restore a backup:
   sudo systemctl stop freeradius

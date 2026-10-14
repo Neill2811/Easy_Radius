@@ -1,0 +1,7 @@
+name: Set identity
+variables:
+  identity_name: "ExampleSite"
+steps:
+  - path: /system/identity
+    set:
+      name: "{{ identity_name }}"

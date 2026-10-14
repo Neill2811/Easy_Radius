@@ -319,3 +319,32 @@ sudo docker exec -it radius-admin python -m easy_radius.reset_admin_password
 ```
 
 It asks for the new password twice and does not print it.
+
+## Automation
+
+**Change many routers from one page**
+
+Automation logs into the routers you already keep in Easy Radius and sets a short list of RouterOS values. It does not use Ansible. The router list and the site groups (tags such as `North`) are the only inventory.
+
+On each MikroTik, before you run a task:
+
+1. Turn on API-SSL: `/ip service enable api-ssl`
+2. Let only this Easy Radius server in: `/ip service set api-ssl address=<this server>/32`
+3. API-SSL listens on port **8729**. If that port does not answer, Easy Radius tries the plaintext API on port **8728**. Prefer 8729. The router's certificate is usually self-signed, and Easy Radius accepts that.
+4. The router must already send logins to this RADIUS server (the lines under **Copy MikroTik config**, including `use-radius=yes`).
+5. SSH is not required for a task. `/export` is read over the API.
+
+On the Automation page:
+
+1. Save a **service account**. This is a RADIUS user Easy Radius uses to log into the API. Create one (group `write` or `full`) or pick an existing user and type the password again. The password is encrypted and is not shown after you save it. You can generate one instead of typing it.
+2. Click **Apply** so FreeRADIUS learns that user. Until you do, the router cannot authenticate the account.
+3. A `read` user can be used for Check, but Run will be refused by the router.
+4. Open a task. The built-in examples set NTP, DNS, identity, and SNMP. Edit the example addresses before you use them. You can also write a task as lines such as `/ip/dns set servers=192.0.2.53 allow-remote-requests=no`, or upload YAML or JSON.
+5. Click **Run** on the task. Tick routers, or a site group, or both. Disabled routers are left out.
+6. Click **Check** first. It reads the current values and shows what would change. It does not write.
+7. Click **Run** to write only the values that differ. If you selected more than one router, tick the confirmation and accept the question in the browser.
+8. **Routers at a time** is the batch size. Those routers are contacted together. If one fails, later batches do not start, and routers that had not started are marked skipped.
+9. Before it changes a router, Run saves that router's `/export`. Open **View /export** on the result. Secrets are hidden in a normal export, so **Restore** cannot put passwords back. Restore asks you to confirm, then sends the saved text to that router.
+10. The result for each router (ok, changed, failed, or skipped) is on the run page and under **History**, with your admin name on the row.
+
+The service-account password is not written into a task, a run, or History.
