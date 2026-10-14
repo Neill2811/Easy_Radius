@@ -41,11 +41,22 @@ def evaluate(session, server_address: str = "") -> list[dict]:
     ssl_ok = ssl is not None and not _disabled(ssl.get("disabled")) and address not in {"", "0.0.0.0/0", "::/0"}
     add("api-ssl", "api-ssl is restricted to an address", ssl_ok, address or "no address limit")
     plain = _service(services, "api")
-    plain_off = plain is None or _disabled(plain.get("disabled"))
-    add("api", "Plaintext API is off", plain_off, "disabled" if plain_off else "port 8728 is enabled")
+    plain_passed, plain_detail = _plaintext_api(plain)
+    add("api", "Plaintext API is off or restricted", plain_passed, plain_detail)
     radius_ok = same_value(aaa.get("use-radius"), "true")
     add("radius", "RADIUS login is enabled", radius_ok, "use-radius is on" if radius_ok else "use-radius is off")
     return checks
+
+
+def _plaintext_api(row: dict | None) -> tuple[bool, str]:
+    """Port 8728 may stay on when it is limited to specific addresses."""
+    if row is None or _disabled(row.get("disabled")):
+        return True, "disabled"
+    addresses = [part.strip() for part in str(row.get("address") or "").split(",") if part.strip()]
+    open_any = {"", "0.0.0.0/0", "::/0"}
+    if not addresses or any(part in open_any for part in addresses):
+        return False, "enabled, open to any address"
+    return True, "enabled, restricted to " + ",".join(addresses)
 
 
 def score(checks: list[dict]) -> tuple[int, int]:
@@ -58,7 +69,6 @@ def fix_template(server_address: str) -> Template:
         Step("/ip/service", {"disabled": "yes"}, {"name": "telnet"}),
         Step("/ip/service", {"disabled": "yes"}, {"name": "ftp"}),
         Step("/ip/service", {"disabled": "yes"}, {"name": "www"}),
-        Step("/ip/service", {"disabled": "yes"}, {"name": "api"}),
         Step("/user/aaa", {"use-radius": "yes"}, {}),
         Step("/user", {"disabled": "yes"}, {"name": "admin"}),
     ]

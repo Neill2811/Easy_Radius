@@ -5,7 +5,7 @@
   <h1>Compliance</h1>
 </div>
 <div class="card">
-  <p class="help">Checks telnet, ftp, and www are off, the default admin cannot log in, NTP is set, api-ssl is limited to an address, plaintext API is off, and RADIUS login is on. Fix uses the automation service account and writes only what differs.</p>
+  <p class="help">Checks telnet, ftp, and www are off, the default admin cannot log in, NTP is set, api-ssl is limited to an address, plaintext API is off or limited to specific addresses, and RADIUS login is on. Fix uses the automation service account and writes only what differs. It does not turn off the plaintext API.</p>
   <form method="post" action="{{ url_for('compliance_check') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button type="submit">Check now</button>

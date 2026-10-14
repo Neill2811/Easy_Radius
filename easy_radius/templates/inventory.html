@@ -25,7 +25,7 @@
         <td>{{ router.ip }}</td>
         <td>{{ facts.model }}</td>
         <td>{{ facts.serial }}</td>
-        <td>{{ facts.version }}</td>
+        <td>{{ facts.version or 'unknown' }}</td>
         <td>{{ facts.uptime }}</td>
         <td>{{ facts.licence }}</td>
       </tr>

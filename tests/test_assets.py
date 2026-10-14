@@ -11,10 +11,22 @@ PASSWORD = "example-password"
 
 
 def test_version_compare_and_upstream_parse():
+    from easy_radius.facts import version_label
+
     assert parse_version("7.16.2 (stable)") == (7, 16, 2)
     assert outdated("7.16.2", "7.24.5")
     assert not outdated("7.24.5", "7.24.5")
     assert not outdated("7.25", "7.24.5")
+    assert parse_version(None) is None
+    assert parse_version("") is None
+    assert parse_version("   ") is None
+    assert parse_version("not-a-version") is None
+    assert not outdated("", "7.24.5")
+    assert not outdated(None, "7.24.5")
+    assert not outdated("not-a-version", "7.24.5")
+    assert not outdated("7.16.2", "")
+    assert version_label(None) == "unknown"
+    assert version_label("  ") == "unknown"
 
     class Response:
         def read(self, n):
@@ -108,3 +120,22 @@ def test_inventory_csv_and_firmware_page(tmp_path):
     firmware = client.get("/firmware").get_data(as_text=True)
     assert "outdated" in firmware
     assert "7.24.5" in firmware
+
+    state["routers"].append(
+        {"id": "r2", "site_name": "Example North", "ip": "192.0.2.11", "enabled": True, "tags": ["North"]}
+    )
+    state["routers"].append(
+        {"id": "r3", "site_name": "Example South", "ip": "192.0.2.12", "enabled": True, "tags": [], "facts": {}}
+    )
+    save_state(data, state)
+    missing = client.get("/firmware")
+    assert missing.status_code == 200
+    missing_body = missing.get_data(as_text=True)
+    assert missing_body.count("unknown") >= 2
+    assert "Example North" in missing_body
+    inventory = client.get("/inventory")
+    assert inventory.status_code == 200
+    assert "unknown" in inventory.get_data(as_text=True)
+    for path in ("/monitoring", "/compliance", "/reports"):
+        page = client.get(path)
+        assert page.status_code == 200, path
