@@ -24,6 +24,26 @@
   {% else %}
   <p class="empty">No changes yet.</p>
   {% endif %}
+  <h2 class="section">Automation</h2>
+  {% if automation_runs %}
+  <table>
+    <thead>
+      <tr><th>When</th><th>Who</th><th>Task</th><th>Routers</th></tr>
+    </thead>
+    <tbody>
+      {% for run in automation_runs %}
+      <tr>
+        <td data-label="When">{{ run.at }}</td>
+        <td data-label="Who">{{ run.actor }}</td>
+        <td data-label="Task"><a href="{{ url_for('automation_run_detail', run_id=run.id) }}">{{ run.task_name }}</a> {% if run.mode == 'check' %}(check){% endif %}</td>
+        <td data-label="Routers">{% for router in run.routers %}{{ router.site_name }} {{ router.status }}{% if not loop.last %}; {% endif %}{% endfor %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No automation runs yet.</p>
+  {% endif %}
   <h2 class="section">Apply snapshots</h2>
   <p class="help">Roll back replaces the current routers and users with that snapshot and applies it to FreeRADIUS.</p>
   {% if snapshots %}

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Export · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Saved export</h1>
+  <a href="{{ url_for('automation_run_detail', run_id=run_id) }}">Back to the run</a>
+</div>
+<div class="card">
+  <p class="help">Taken with <code>/export</code> before the task changed the router. RouterOS hides secrets in this export, so a restore does not put those secrets back.</p>
+  {% if truncated %}<p class="error">The view is shortened. The saved file is complete.</p>{% endif %}
+  <pre class="output">{{ text }}</pre>
+  <form method="post" action="{{ url_for('automation_restore', run_id=run_id, router_id=router_id) }}" data-confirm="Send this export back to the router?">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="choice"><input type="checkbox" name="confirm_restore" value="yes" required> I want to restore this export on this router.</label>
+    <button type="submit">Restore</button>
+  </form>
+</div>
+{% endblock %}

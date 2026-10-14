@@ -542,10 +542,13 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
     def history():
         state = load_state(app.config["DATA_DIR"])
         events = list(reversed(state.get("audit") or []))
+        from easy_radius.automation import list_runs
+
         return render_template(
             "history.html",
             events=events[:200],
             snapshots=list_snapshots(app.config["DATA_DIR"]),
+            automation_runs=list_runs(app.config["DATA_DIR"])[:20],
         )
 
     @app.post("/history/<snap_id>/rollback")
@@ -755,6 +758,9 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
         flash("Authenticator codes are off.", "ok")
         return redirect(url_for("security"))
 
+    from easy_radius.automation_web import register_automation
+
+    register_automation(app)
     return app
 
 

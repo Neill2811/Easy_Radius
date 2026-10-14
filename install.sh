@@ -410,4 +410,6 @@ if [[ "$ENABLE_UFW" -eq 1 ]]; then
   configure_ufw
 fi
 
+log "Automation uses the RouterOS API from Easy Radius (port 8729, then 8728)."
+log "On each router enable api-ssl and allow this server. There is no Ansible container."
 log "Done."

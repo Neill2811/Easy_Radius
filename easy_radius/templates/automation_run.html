@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Run {{ task.name }} · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ task.name }}</h1>
+  <a href="{{ url_for('automation') }}">Back to automation</a>
+</div>
+<div class="card">
+  {% if not ready %}<p class="error">Set the service account before running a task.</p>{% endif %}
+  <p class="help">Check reads each value and shows what would change. Run writes only the values that differ. Before a run, Easy Radius saves <code>/export</code> for each router. Secrets in that export are hidden.</p>
+  <form method="post" id="run-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% if variables %}
+    <h2>Values</h2>
+    {% for name, default in variables.items() %}
+    <label for="var_{{ name }}">{{ name }}</label>
+    <input id="var_{{ name }}" name="var_{{ name }}" value="{{ default }}">
+    {% endfor %}
+    {% endif %}
+    <h2 class="section">Routers</h2>
+    {% if routers %}
+    <div class="checkboxes">
+      {% for router in routers %}
+      <label>
+        <input type="checkbox" name="router_ids" value="{{ router.id }}">
+        {{ router.site_name }} ({{ router.ip }})
+      </label>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty">No enabled routers yet.</p>
+    {% endif %}
+    {% if tags %}
+    <p class="help">Site groups</p>
+    <div class="checkboxes">
+      {% for tag in tags %}
+      <label><input type="checkbox" name="tags" value="{{ tag }}"> {{ tag }}</label>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <label for="batch">Routers at a time</label>
+    <input id="batch" name="batch" type="number" min="1" max="50" value="1">
+    <p class="help">That many routers are contacted together. If one fails, the next batch does not start.</p>
+    <label class="choice"><input type="checkbox" name="confirm_many" value="yes"> I confirm this run when more than one router is selected.</label>
+    <button class="secondary" type="submit" name="mode" value="check">Check</button>
+    <button type="submit" name="mode" value="run">Run</button>
+  </form>
+</div>
+<script>
+document.getElementById("run-form").addEventListener("submit", (event) => {
+  const selected = document.querySelectorAll("#run-form input[name=router_ids]:checked, #run-form input[name=tags]:checked");
+  const mode = event.submitter && event.submitter.value === "check" ? "check" : "run";
+  if (selected.length > 1 && !window.confirm("This " + mode + " targets more than one router. Continue?")) {
+    event.preventDefault();
+  }
+});
+</script>
+{% endblock %}

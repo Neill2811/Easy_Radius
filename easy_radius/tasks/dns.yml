@@ -1,0 +1,8 @@
+name: Set DNS
+variables:
+  dns_servers: "192.0.2.53,192.0.2.54"
+steps:
+  - path: /ip/dns
+    set:
+      servers: "{{ dns_servers }}"
+      allow-remote-requests: "no"

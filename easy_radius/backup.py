@@ -32,6 +32,10 @@ def export_payload(state: dict) -> dict:
         "totp_secret": state.get("totp_secret") or "",
         "totp_enabled": bool(state.get("totp_enabled")),
         "admin_password_hash": state.get("admin_password_hash") or "",
+        "tasks": state.get("tasks") or [],
+        "tasks_seeded": bool(state.get("tasks_seeded")),
+        "automation_account": state.get("automation_account") or {},
+        "automation_key": state.get("automation_key") or "",
     }
 
 
@@ -53,6 +57,13 @@ def apply_payload(state: dict, payload: dict) -> None:
     state["totp_enabled"] = bool(payload.get("totp_enabled"))
     if payload.get("admin_password_hash"):
         state["admin_password_hash"] = payload["admin_password_hash"]
+    if "tasks" in payload:
+        state["tasks"] = payload.get("tasks") or []
+        state["tasks_seeded"] = bool(payload.get("tasks_seeded"))
+    if "automation_account" in payload and isinstance(payload.get("automation_account"), dict):
+        state["automation_account"] = payload["automation_account"]
+    if payload.get("automation_key"):
+        state["automation_key"] = payload["automation_key"]
 
 
 def encrypt_backup(payload: dict, passphrase: str, iterations: int = KDF_ITERATIONS) -> bytes:

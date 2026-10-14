@@ -70,6 +70,10 @@ def _empty_state() -> dict:
         "totp_enabled": False,
         "last_apply": None,
         "last_test": None,
+        "tasks": [],
+        "tasks_seeded": False,
+        "automation_account": {},
+        "automation_key": "",
     }
 
 
@@ -107,6 +111,12 @@ def load_state(data_dir: Path) -> dict:
         item["access"] = "routers" if item.get("access") == "routers" else "all"
         item["router_ids"] = [str(value) for value in (item.get("router_ids") or [])]
         item["access_tags"] = _name_list(item.get("access_tags"))
+    if not isinstance(state.get("tasks"), list):
+        state["tasks"] = []
+    if not isinstance(state.get("automation_account"), dict):
+        state["automation_account"] = {}
+    state["automation_key"] = state.get("automation_key") or ""
+    state["tasks_seeded"] = bool(state.get("tasks_seeded"))
     if migrate_users(state["users"]):
         save_state(data_dir, state)
     return state
