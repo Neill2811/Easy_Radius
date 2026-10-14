@@ -10,7 +10,7 @@ from flask import abort, flash, redirect, render_template, request, url_for
 
 from easy_radius.audit import record
 from easy_radius.automation import AutomationError, launch_run, new_run_id, save_run
-from easy_radius.compliance import evaluate, fix_template, score
+from easy_radius.compliance import evaluate, fix_template, present_report, score
 from easy_radius.config_backups import (
     backup_due,
     complete_backup,
@@ -120,7 +120,7 @@ def register_ops(app) -> None:
         return render_template(
             "compliance.html",
             routers=[router for router in state["routers"] if router.get("enabled", True)],
-            report=state.get("last_compliance"),
+            report=present_report(state.get("last_compliance")),
         )
 
     @app.post("/compliance/check")

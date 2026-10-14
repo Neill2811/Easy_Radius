@@ -325,13 +325,37 @@ def test_plaintext_api_passes_when_disabled_or_limited_to_addresses():
     )
 
 
+def test_failed_routers_are_listed_before_compliant_ones():
+    from easy_radius.compliance import present_report
+
+    report = present_report(
+        {
+            "at": "2026-10-14T00:00:00Z",
+            "routers": [
+                {"id": "ok", "site_name": "Example North", "ip": "192.0.2.11", "passed": 8, "total": 8, "error": ""},
+                {"id": "bad", "site_name": "ExampleSite", "ip": "192.0.2.10", "passed": 7, "total": 8, "error": ""},
+                {"id": "down", "site_name": "Example South", "ip": "192.0.2.12", "passed": 0, "total": 0, "error": "connection refused"},
+            ],
+        }
+    )
+    assert [router["site_name"] for router in report["routers"]] == [
+        "ExampleSite",
+        "Example South",
+        "Example North",
+    ]
+    assert [router["compliant"] for router in report["routers"]] == [False, False, True]
+    assert report["compliant"] == 1
+    assert report["router_count"] == 3
+
+
 def test_compliance_page_keeps_check_details_without_a_service_table(tmp_path):
     secret = "example-community-secret"
     data = tmp_path / "data"
     prepare_state(data, admin_password=PASSWORD)
     state = load_state(data)
     state["routers"] = [
-        {"id": "r1", "site_name": "ExampleSite", "ip": "192.0.2.10", "enabled": True, "api_plaintext": False}
+        {"id": "r-ok", "site_name": "Example North", "ip": "192.0.2.11", "enabled": True, "api_plaintext": False},
+        {"id": "r1", "site_name": "ExampleSite", "ip": "192.0.2.10", "enabled": True, "api_plaintext": False},
     ]
     from easy_radius.automation import automation_key, encrypt_secret
 
@@ -342,6 +366,45 @@ def test_compliance_page_keeps_check_details_without_a_service_table(tmp_path):
         "password_enc": encrypt_secret(key, PASSWORD),
     }
     save_state(data, state)
+
+    class Passing:
+        def rows(self, path):
+            if path == "/ip/service":
+                return [
+                    {"name": "telnet", "port": "23", "disabled": "true"},
+                    {"name": "ftp", "port": "21", "disabled": "false", "address": "192.0.2.10/32"},
+                    {"name": "ssh", "port": "22", "disabled": "false", "address": "192.0.2.10/32"},
+                    {"name": "winbox", "port": "8291", "disabled": "false", "address": "192.0.2.0/24"},
+                    {"name": "www", "port": "80", "disabled": "true"},
+                    {"name": "www-ssl", "port": "443", "disabled": "true"},
+                    {"name": "api", "port": "8728", "disabled": "true"},
+                    {"name": "api-ssl", "port": "8729", "disabled": "false", "address": "192.0.2.1/32"},
+                ]
+            if path == "/user":
+                return [{"name": "admin", "disabled": "yes"}]
+            if path == "/snmp/community":
+                return [
+                    {
+                        "name": "monitor",
+                        "addresses": "192.0.2.10/32",
+                        "read-access": "yes",
+                        "write-access": "no",
+                        "security": "none",
+                    }
+                ]
+            return []
+
+        def get(self, path):
+            if path == "/system/ntp/client":
+                return {"enabled": "true", "servers": "192.0.2.53"}
+            if path == "/user/aaa":
+                return {"use-radius": "yes"}
+            if path == "/snmp":
+                return {"enabled": "yes"}
+            return {}
+
+        def close(self):
+            pass
 
     class Session:
         def rows(self, path):
@@ -381,6 +444,8 @@ def test_compliance_page_keeps_check_details_without_a_service_table(tmp_path):
 
     def connector(host, username, password, allow_plaintext=False):
         assert password == PASSWORD
+        if host == "192.0.2.11":
+            return Passing()
         return Session()
 
     app = create_app(data_dir=data, runner=lambda args, timeout=120: None)
@@ -394,6 +459,11 @@ def test_compliance_page_keeps_check_details_without_a_service_table(tmp_path):
     token = re.search(r'name="csrf_token" value="([^"]+)"', page.get_data(as_text=True)).group(1)
     checked = client.post("/compliance/check", data={"csrf_token": token}, follow_redirects=True)
     body = checked.get_data(as_text=True)
+    assert "1 of 2 routers compliant" in body
+    assert "12/12" in body
+    assert body.index("ExampleSite") < body.index("Example North")
+    assert "<details" in body
+    assert re.search(r"<details\b[^>]*\bopen\b", body) is None
     assert "enabled on port 8291, restricted to 192.0.2.0/24" in body
     assert "Winbox is off or restricted" in body
     assert "www is off" in body
@@ -401,6 +471,9 @@ def test_compliance_page_keeps_check_details_without_a_service_table(tmp_path):
     assert "disabled on port 80" in body
     assert "enabled on port 22, restricted to 192.0.2.10/32" in body
     assert "monitor" in body
+    assert 'name="router_ids" value="r1"' in body
+    assert 'value="r-ok"' not in body
+    assert "Fix ticked routers" in body
     assert "Allowed addresses" not in body
     assert ">Services<" not in body
     assert secret not in body

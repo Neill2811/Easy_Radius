@@ -246,6 +246,24 @@ tr.is-disabled td { color: var(--muted); }
   color: #8a4b08;
 }
 h2.section { margin-top: 1.5rem; }
+.compliance-summary { font-weight: 700; margin-bottom: 0.2rem; }
+details.router-row {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 0.5rem 0;
+}
+details.router-row summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 1rem;
+  align-items: center;
+  padding: 0.7rem 0.85rem;
+  cursor: pointer;
+  font-weight: 700;
+}
+details.router-row summary .router-name { min-width: 8rem; }
+details.router-row summary .router-score { font-variant-numeric: tabular-nums; }
+details.router-row .router-body { padding: 0 0.85rem 0.85rem; }
 pre.mikrotik { margin: 0.4rem 0; }
 .choice { font-weight: 500; margin: 0.35rem 0; }
 .choice input, .checkboxes input { width: auto; max-width: none; margin-right: 0.4rem; }
