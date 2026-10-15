@@ -27,8 +27,10 @@ def mikrotik_commands(server: str, secret: str, router_ip: str) -> str:
     The first line adds this server. The second updates an entry that is
     already there. src-address is the router IP stored in Easy Radius.
     The later lines create an API-SSL certificate for that same router IP
-    and allow only this server on port 8729. A certificate that already
-    exists is left alone, so the script can be pasted again.
+    and allow only this server on port 8729. Each condition is one line, so
+    a RouterOS terminal does not join '}' with the next command. A signed
+    api-ssl certificate is left alone. One that exists but was not signed
+    by api-ssl-ca is removed and created again.
     """
     hidden = _ros_word(secret)
     server_word = _ros_word(server)
@@ -39,17 +41,16 @@ def mikrotik_commands(server: str, secret: str, router_ip: str) -> str:
         f"src-address={router_word} timeout=3s\n"
         f"/radius set [find address={server_word}] src-address={router_word} secret={hidden}\n"
         "/user aaa set use-radius=yes\n"
-        ":if ([:len [/certificate find name=api-ssl-ca]] = 0) do={\n"
+        ":if ([:len [/certificate find name=api-ssl-ca]] = 0) do={"
         "/certificate add name=api-ssl-ca common-name=api-ssl-ca "
-        "key-usage=key-cert-sign,crl-sign days-valid=3650\n"
-        "/certificate sign api-ssl-ca\n"
-        ":delay 5\n"
-        "}\n"
-        ":if ([:len [/certificate find name=api-ssl]] = 0) do={\n"
-        f"/certificate add name=api-ssl common-name={router_word} days-valid=3650\n"
-        "/certificate sign api-ssl ca=api-ssl-ca\n"
-        ":delay 5\n"
-        "}\n"
+        "key-usage=key-cert-sign,crl-sign days-valid=3650; "
+        "/certificate sign api-ssl-ca; :delay 5}\n"
+        ":if ([:len [/certificate find name=api-ssl]] > 0 && "
+        "[:len [/certificate find name=api-ssl ca=api-ssl-ca]] = 0) do={"
+        "/certificate remove [find name=api-ssl]}\n"
+        ":if ([:len [/certificate find name=api-ssl]] = 0) do={"
+        f"/certificate add name=api-ssl common-name={router_word} days-valid=3650; "
+        "/certificate sign api-ssl ca=api-ssl-ca; :delay 5}\n"
         f"/ip service set api-ssl certificate=api-ssl address={server_cidr} disabled=no\n"
         "# Uncomment the next line if the input chain ends with a drop rule.\n"
         "# /ip firewall filter add chain=input protocol=tcp dst-port=8729 "

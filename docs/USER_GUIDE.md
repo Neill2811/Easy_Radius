@@ -96,7 +96,7 @@ These lines are what you paste on the router. They stay hidden until you click, 
    - `/radius set [find address=<this server>] src-address=<router IP> secret=<that router's secret>`
    - `/user aaa set use-radius=yes`
    - Lines that create a local CA named `api-ssl-ca` and a certificate named `api-ssl` whose common name is the router IP, then set `/ip service` `api-ssl` to that certificate and to `<this server>/32`.
-4. Paste the first line on a router that does not yet have this server. Paste the second if `/radius` already lists it. Paste the third so logins use RADIUS. Paste the certificate lines as well. They skip `api-ssl-ca` or `api-ssl` when a certificate with that name already exists, so pasting again does not create a second one. They do not change the plaintext API, FTP, or SNMP.
+4. Paste the first line on a router that does not yet have this server. Paste the second if `/radius` already lists it. Paste the third so logins use RADIUS. Paste the certificate lines as well. Each condition is one line, so the terminal does not join a closing brace with the next command. They skip `api-ssl-ca` when that name already exists. If `api-ssl` exists but was not signed by that CA, it is removed and created again. A signed `api-ssl` is left alone. They do not change the plaintext API, FTP, or SNMP.
 5. A firewall line for TCP port 8729 is included as a comment. Uncomment it if the input chain ends with a drop rule. Otherwise leave it commented.
 6. Click **Hide MikroTik config** when you are finished.
 
