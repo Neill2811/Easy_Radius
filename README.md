@@ -84,7 +84,7 @@ Package upgrades during install keep the existing config files (`--force-confold
 
 The signed-in pages use a left sidebar. **Dashboard** is the page after login. It summarises saved router health, compliance, backups, alerts, logins, history, temporary access, firmware, and this server. It does not contact the routers. Access holds Users, Routers, Temporary access, and Test login. Configuration holds Apply, Automation, Backups, Firmware, and Compliance. Monitoring holds Monitoring, Logins, Sessions, and Inventory. Reports & audit holds Reports and History. System holds Admin password & 2FA and the Easy Radius backup. Compliance shows how many routers failed the last check. Monitoring shows a red dot when the last stored check left a down router or another alert.
 
-- **Routers.** Site name, IP, secret, and a green or red status from the last RADIUS packet (green if one arrived in the last 15 minutes). Secrets stay hidden until you click Show. Disable a router instead of deleting it. **Copy MikroTik config** shows, only after you click, the RouterOS commands with that router's secret filled in. The commands set `src-address` to the router IP stored here, which must be an address the router itself owns. Without that, a router behind NAT can send from a public address FreeRADIUS does not know, and the packet is ignored. Set "This server's address" first; that address is what the router should use. The second command updates a RADIUS entry that is already on the router. The same script creates an API-SSL certificate named `api-ssl` with the router IP as the common name, and limits port 8729 to this server. It skips a certificate that already has that name. A firewall line for port 8729 is commented out. The plaintext API is not changed.
+- **Routers.** Site name, IP, secret, and a green or red status from the last RADIUS packet (green if one arrived in the last 15 minutes). Secrets stay hidden until you click Show. Disable a router instead of deleting it. **Copy MikroTik config** shows, only after you click, the RouterOS commands with that router's secret filled in. The commands set `src-address` to the router IP stored here, which must be an address the router itself owns. Without that, a router behind NAT can send from a public address FreeRADIUS does not know, and the packet is ignored. Set "This server's address" first; that address is what the router should use. The second command updates a RADIUS entry that is already on the router. The same script creates an API-SSL certificate named `api-ssl` with the router IP as the common name, and limits port 8729 to this server. Each condition is one line. It skips `api-ssl-ca` when that name exists, and replaces `api-ssl` when that certificate exists but is not signed. A firewall line for port 8729 is commented out. The plaintext API is not changed.
 - **Users.** Username, group `full` / `write` / `read` (`Mikrotik-Group`), and access. The password is stored only as two hashes: SHA-512 crypt (`$6$`) for PAP, and an NT hash for MS-CHAP / MS-CHAPv2. It cannot be shown again. **Set new password** replaces both. Access is **All routers** unless you choose routers or a site group. A site group is a tag on the router, such as `North`. Disable a user instead of deleting them. Disabled routers and users are left out of the files Apply writes. A restricted user is rejected on any other router. The check uses the packet source address and the client shortname, so a router cannot pretend to be another site. The Test page can still imitate a router from this server by setting NAS-IP-Address. SSH logins and `radtest` use PAP. MikroTik Winbox uses MS-CHAPv2. A user saved when only the crypt hash was stored cannot be converted; the Users page shows **Set password again to enable Winbox/MS-CHAP** until you set the password again.
 - **Logins.** Recent Access-Accept and Access-Reject lines, filtered by router, user, and result.
 - **Sessions.** Who is logged in now, and recent accounting (start, update, stop).
@@ -163,16 +163,9 @@ MikroTik commands, for a server at `192.0.2.1`, a router at `192.0.2.10`, and a 
 /radius add address=192.0.2.1 secret=example-router-secret service=login src-address=192.0.2.10 timeout=3s
 /radius set [find address=192.0.2.1] src-address=192.0.2.10 secret=example-router-secret
 /user aaa set use-radius=yes
-:if ([:len [/certificate find name=api-ssl-ca]] = 0) do={
-/certificate add name=api-ssl-ca common-name=api-ssl-ca key-usage=key-cert-sign,crl-sign days-valid=3650
-/certificate sign api-ssl-ca
-:delay 5
-}
-:if ([:len [/certificate find name=api-ssl]] = 0) do={
-/certificate add name=api-ssl common-name=192.0.2.10 days-valid=3650
-/certificate sign api-ssl ca=api-ssl-ca
-:delay 5
-}
+:if ([:len [/certificate find name=api-ssl-ca]] = 0) do={/certificate add name=api-ssl-ca common-name=api-ssl-ca key-usage=key-cert-sign,crl-sign days-valid=3650; /certificate sign api-ssl-ca; :delay 5}
+:if ([:len [/certificate find name=api-ssl]] > 0 && [:len [/certificate find name=api-ssl ca=api-ssl-ca]] = 0) do={/certificate remove [find name=api-ssl]}
+:if ([:len [/certificate find name=api-ssl]] = 0) do={/certificate add name=api-ssl common-name=192.0.2.10 days-valid=3650; /certificate sign api-ssl ca=api-ssl-ca; :delay 5}
 /ip service set api-ssl certificate=api-ssl address=192.0.2.1/32 disabled=no
 # Uncomment the next line if the input chain ends with a drop rule.
 # /ip firewall filter add chain=input protocol=tcp dst-port=8729 src-address=192.0.2.1 action=accept place-before=0 comment="Easy Radius API-SSL"

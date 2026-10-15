@@ -77,17 +77,16 @@ def test_mikrotik_commands_set_src_address_to_the_router_ip():
         "src-address=192.0.2.10 timeout=3s\n"
         "/radius set [find address=192.0.2.1] src-address=192.0.2.10 secret=example-router-secret\n"
         "/user aaa set use-radius=yes\n"
-        ":if ([:len [/certificate find name=api-ssl-ca]] = 0) do={\n"
+        ":if ([:len [/certificate find name=api-ssl-ca]] = 0) do={"
         "/certificate add name=api-ssl-ca common-name=api-ssl-ca "
-        "key-usage=key-cert-sign,crl-sign days-valid=3650\n"
-        "/certificate sign api-ssl-ca\n"
-        ":delay 5\n"
-        "}\n"
-        ":if ([:len [/certificate find name=api-ssl]] = 0) do={\n"
-        "/certificate add name=api-ssl common-name=192.0.2.10 days-valid=3650\n"
-        "/certificate sign api-ssl ca=api-ssl-ca\n"
-        ":delay 5\n"
-        "}\n"
+        "key-usage=key-cert-sign,crl-sign days-valid=3650; "
+        "/certificate sign api-ssl-ca; :delay 5}\n"
+        ":if ([:len [/certificate find name=api-ssl]] > 0 && "
+        "[:len [/certificate find name=api-ssl ca=api-ssl-ca]] = 0) do={"
+        "/certificate remove [find name=api-ssl]}\n"
+        ":if ([:len [/certificate find name=api-ssl]] = 0) do={"
+        "/certificate add name=api-ssl common-name=192.0.2.10 days-valid=3650; "
+        "/certificate sign api-ssl ca=api-ssl-ca; :delay 5}\n"
         "/ip service set api-ssl certificate=api-ssl address=192.0.2.1/32 disabled=no\n"
         "# Uncomment the next line if the input chain ends with a drop rule.\n"
         "# /ip firewall filter add chain=input protocol=tcp dst-port=8729 "
@@ -96,6 +95,14 @@ def test_mikrotik_commands_set_src_address_to_the_router_ip():
     assert "8728" not in text
     assert "ftp" not in text.lower()
     assert "snmp" not in text.lower()
+    assert "}:if" not in text
+    assert "\r" not in text
+    for line in text.splitlines():
+        assert not line.startswith("}")
+        assert not re.match(r"\}\s*\S", line)
+        if line.startswith(":if"):
+            assert line.endswith("}")
+            assert "do={" in line
     quoted = mikrotik_commands("192.0.2.1", 'has space "quote"', "192.0.2.10")
     assert 'secret="has space \\"quote\\""' in quoted
     v6 = mikrotik_commands("2001:db8::1", "example-router-secret", "2001:db8::10")
