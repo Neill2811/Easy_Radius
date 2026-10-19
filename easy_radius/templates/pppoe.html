@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}PPPoE failures · Easy Radius{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>PPPoE failures</h1>
+</div>
+<div class="card">
+  <p class="help">Easy Radius reads each router's log over the API and keeps PPPoE failures for 30 days. It does not change the router. A username or MAC that is in an active PPPoE session is cleared. Times are South African Standard Time.</p>
+  <form method="post" action="{{ url_for('pppoe_settings') }}" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="choice"><input type="checkbox" name="enabled" value="yes" {% if settings.enabled %}checked{% endif %}> Poll routers</label>
+    <label for="interval_minutes">Every (minutes)</label>
+    <input id="interval_minutes" name="interval_minutes" type="number" min="1" max="1440" value="{{ settings.interval_minutes }}">
+    <label for="threshold">Dashboard after this many failures in 24 hours</label>
+    <input id="threshold" name="threshold" type="number" min="1" value="{{ settings.threshold }}">
+    <button class="secondary" type="submit">Save</button>
+  </form>
+  <form method="post" action="{{ url_for('pppoe_poll') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Poll now</button>
+  </form>
+  {% if settings.last_run %}<p class="help">Last poll started {{ settings.last_run }}</p>{% endif %}
+</div>
+<div class="card">
+  <h2>Poll status</h2>
+  {% if status %}
+  <table>
+    <thead><tr><th>Router</th><th>Status</th><th>When</th><th>Detail</th></tr></thead>
+    <tbody>
+      {% for row in status %}
+      <tr>
+        <td>{{ row.site_name }}</td>
+        <td>{% if row.status == 'ok' %}<span class="status up">ok</span>{% elif row.status == 'failed' %}<span class="status down">failed</span>{% else %}not polled{% endif %}</td>
+        <td>{{ row.at or "—" }}</td>
+        <td>{{ row.detail }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No routers yet.</p>
+  {% endif %}
+</div>
+<div class="card">
+  <h2>Failures</h2>
+  <form method="get" class="inline-form">
+    <label for="router">Router</label>
+    <select id="router" name="router">
+      <option value="">All routers</option>
+      {% for router in routers %}
+      <option value="{{ router.id }}" {% if chosen == router.id %}selected{% endif %}>{{ router.site_name }}</option>
+      {% endfor %}
+    </select>
+    <button class="secondary" type="submit">Filter</button>
+  </form>
+  {% if rows %}
+  {% for row in rows %}
+  <h3 class="section">{{ row.site_name }} · {{ row.username or "no username" }}{% if row.mac %} · {{ row.mac }}{% endif %}</h3>
+  <p class="stat-note">{{ row.count }} failed attempts in 24 hours. First {{ row.first_seen }}. Last {{ row.last_seen }}.</p>
+  {% if row.lines %}
+  <pre class="output">{% for line in row.lines %}{{ line.time }}  {{ line.message }}
+{% endfor %}</pre>
+  {% endif %}
+  <form method="post" action="{{ url_for('pppoe_removed', router_id=row.router_id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="username" value="{{ row.username }}">
+    <input type="hidden" name="mac" value="{{ row.mac }}">
+    <button class="secondary small" type="submit">Mark removed</button>
+  </form>
+  {% endfor %}
+  {% else %}
+  <p class="empty">No PPPoE failures stored yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

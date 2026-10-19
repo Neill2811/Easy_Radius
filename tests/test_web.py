@@ -187,6 +187,7 @@ def test_sidebar_lists_every_page_and_attention_marks(tmp_path):
         "Firmware",
         "Compliance",
         "Monitoring",
+        "PPPoE failures",
         "Logins",
         "Sessions",
         "Inventory",

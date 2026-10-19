@@ -48,7 +48,7 @@ def build_dashboard(
         "compliance": _compliance(state),
         "backup": _config_backup(state),
         "alerts": _alerts(state),
-        "attention": _attention(routers, health, names, state),
+        "attention": _attention(routers, health, names, state, data_dir, now),
         "logins": _logins(auth_events, now, state, by_ip),
         "activity": _activity(state),
         "grants": _grants(state, now, names),
@@ -128,7 +128,7 @@ def _alerts(state: dict) -> dict:
     return {"count": len(alerts), "items": [{"detail": str(alert.get("detail") or "Alert")} for alert in alerts[:5]]}
 
 
-def _attention(routers: list[dict], health: dict, names: dict, state: dict) -> list[dict]:
+def _attention(routers: list[dict], health: dict, names: dict, state: dict, data_dir: Path, now: int) -> list[dict]:
     items = []
     for router in routers:
         row = health.get(router.get("id"), {})
@@ -192,6 +192,9 @@ def _attention(routers: list[dict], health: dict, names: dict, state: dict) -> l
                     "endpoint": "firmware",
                 }
             )
+    from easy_radius.pppoe_failures import attention_lines
+
+    items.extend(attention_lines(data_dir, state, now))
     return items[:40]
 
 

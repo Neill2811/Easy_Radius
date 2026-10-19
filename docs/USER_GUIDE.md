@@ -2,7 +2,7 @@
 
 This is the day-to-day guide for the person who runs the page. The pictures use sample names only: site `ExampleSite`, addresses in `192.0.2.0/24`, and passwords such as `example-password`. Nothing in these pictures is from a live network.
 
-After you log in, the site opens on **Dashboard**. It is built from saved data and the FreeRADIUS logs. It does not contact the routers. Times on that page are South African Standard Time. The sidebar groups the other pages: Access, Configuration, Monitoring, Reports & audit, and System. On a narrow screen the sidebar keeps the icons and hides the names. Router health is also on **Routers**.
+After you log in, the site opens on **Dashboard**. It is built from saved data and the FreeRADIUS logs. It does not contact the routers when the page opens. Times on that page are South African Standard Time. **Needs attention** can include a PPPoE username or antenna MAC that keeps failing; open **PPPoE failures** under Monitoring for the log lines. The sidebar groups the other pages: Access, Configuration, Monitoring, Reports & audit, and System. On a narrow screen the sidebar keeps the icons and hides the names. Router health is also on **Routers**.
 
 Open the site at `http://<server>:8088`. The username is `neill`. The password is printed once when the container starts (`sudo docker logs radius-admin`).
 
