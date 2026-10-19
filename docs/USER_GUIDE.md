@@ -375,9 +375,9 @@ API-SSL on port 8729 is the only API port used, unless you edit the router and t
 
 1. Open **Firmware**.
 2. Leave a channel box blank and click **Save or fetch** to read the latest RouterOS 7 version for that channel from MikroTik (`stable`, `long-term`, `testing`, or `development`). If this server cannot reach MikroTik, type the version yourself, for example `7.24.5` for stable.
-3. Click **Refresh from routers**. The page shows model, architecture, channel, and the installed version. **outdated** means it is older than the latest version on that same channel. A router with no channel is not marked outdated.
-4. Tick the routers to upgrade. Leave **Change channel** on "Keep each router's channel" unless you mean to move them. Set how many to do at a time. If more than one is ticked, confirm it.
-5. **Upgrade ticked routers** saves `/export` first, then installs on the router's current channel. It does not switch the channel unless you picked one. The router reboots. If one fails, later routers are not started. The row in History names who started it.
+3. Click **Refresh from routers**. The page shows model, architecture, channel, the installed version, and the current and upgrade RouterBOARD firmware. **outdated** means it is older than the latest version on that same channel. A router with no channel is not marked outdated.
+4. Tick the routers to upgrade. Leave **Change channel** on "Keep each router's channel" unless you mean to move them. **Also upgrade RouterBOARD firmware** is on unless you clear it. **Wait for each reboot** is how long to wait for the router to answer again, 10 minutes unless you change it. Set how many to do at a time. If more than one is ticked, confirm it.
+5. **Upgrade ticked routers** saves `/export` first, then installs on the router's current channel. It does not switch the channel unless you picked one. The router reboots. Easy Radius waits for it to come back and reads the RouterOS version. If RouterBOARD firmware is ticked, and the board has `routerboard=yes` with a newer upgrade firmware, it runs the RouterBOARD upgrade and reboots again. CHR and x86 are recorded as not applicable. If one fails, later routers are not started. The firmware page shows the RouterOS result and the RouterBOARD result. The row in History names who started it.
 
 The automation service account must already be saved, and you must have clicked **Apply**, or the refresh cannot log in.
 
