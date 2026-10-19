@@ -35,6 +35,7 @@ _PAGES: dict[str, set[str]] = {
     "firmware": {"firmware", "firmware_latest", "firmware_refresh", "firmware_upgrade"},
     "compliance": {"compliance", "compliance_check", "compliance_fix"},
     "monitoring": {"monitoring", "monitoring_settings", "monitoring_check"},
+    "pppoe": {"pppoe_failures", "pppoe_settings", "pppoe_poll", "pppoe_removed"},
     "logins": {"logins"},
     "sessions": {"sessions"},
     "inventory": {"inventory", "inventory_refresh", "inventory_csv"},
@@ -74,6 +75,7 @@ NAV_GROUPS: list[dict] = [
         "label": "Monitoring",
         "items": [
             {"id": "monitoring", "label": "Monitoring", "endpoint": "monitoring", "icon": "pulse"},
+            {"id": "pppoe", "label": "PPPoE failures", "endpoint": "pppoe_failures", "icon": "pppoe"},
             {"id": "logins", "label": "Logins", "endpoint": "logins", "icon": "list"},
             {"id": "sessions", "label": "Sessions", "endpoint": "sessions", "icon": "sessions"},
             {"id": "inventory", "label": "Inventory", "endpoint": "inventory", "icon": "grid"},

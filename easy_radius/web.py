@@ -793,12 +793,14 @@ def create_app(data_dir: str | Path | None = None, runner=None) -> Flask:
     from easy_radius.assets_web import register_assets
     from easy_radius.automation_web import register_automation
     from easy_radius.ops_web import register_ops
+    from easy_radius.pppoe_web import register_pppoe
     from easy_radius.watch_web import register_watch
 
     register_automation(app)
     register_ops(app)
     register_assets(app)
     register_watch(app)
+    register_pppoe(app)
     return app
 
 
