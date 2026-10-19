@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -124,6 +125,9 @@ def read_facts(session) -> dict:
         "uptime": str(resource.get("uptime") or ""),
         "serial": str(board.get("serial-number") or ""),
         "licence": str(licence.get("level") or licence.get("nlevel") or ""),
+        "routerboard": str(board.get("routerboard") or ""),
+        "current_firmware": str(board.get("current-firmware") or ""),
+        "upgrade_firmware": str(board.get("upgrade-firmware") or ""),
         "cpu": str(resource.get("cpu-load") or ""),
         "memory_used_pct": used,
         "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -168,8 +172,14 @@ def upgrade_router(
     data_dir: Path,
     when: datetime | None = None,
     channel: str | None = None,
+    routerboard: bool = True,
+    wait_seconds: int = 600,
+    sleep=None,
+    clock=None,
 ) -> dict:
     moment = when or datetime.now(timezone.utc)
+    pause = sleep or time.sleep
+    ticks = clock or time.monotonic
     session = _open(connector, router, username, password)
     try:
         text = session.export()
@@ -177,28 +187,96 @@ def upgrade_router(
         chosen = (channel or "").strip()
         if chosen:
             if chosen not in CHANNELS:
-                return {"status": "failed", "detail": "Unknown firmware channel."}
+                return _upgrade_result("failed", "Unknown firmware channel.", "failed", "not started")
             session.call("/system/package/update", "set", channel=chosen)
         session.call("/system/package/update", "check-for-updates")
         try:
             session.call("/system/package/update", "install")
         except Exception as exc:
-            message = _scrub(str(exc), password).lower()
-            if any(word in message for word in ("timed out", "timeout", "connection", "reset", "closed")):
-                return {"status": "started", "detail": "Upgrade started. The router is rebooting."}
-            return {"status": "failed", "detail": _scrub(str(exc), password)}
+            if not _reboot_drop(exc, password):
+                return _upgrade_result("failed", _scrub(str(exc), password), "failed", "not started")
     except Exception as exc:
-        return {"status": "failed", "detail": _scrub(str(exc), password)}
+        return _upgrade_result("failed", _scrub(str(exc), password), "failed", "not started")
     finally:
-        if getattr(session, "close", None):
+        _close(session)
+
+    try:
+        session = _wait_back(router, connector, username, password, wait_seconds, pause, ticks)
+    except TimeoutError as exc:
+        return _upgrade_result("failed", f"Router did not come back after the RouterOS install. {exc}", "failed", "not started")
+    try:
+        resource = session.get("/system/resource") if hasattr(session, "get") else {}
+        version = str((resource or {}).get("version") or "").strip()
+        routeros = f"confirmed {version}" if version else "confirmed"
+        if not routerboard:
+            return _upgrade_result("ok", f"RouterOS {routeros}.", routeros, "skipped")
+        try:
+            board = session.get("/system/routerboard") if hasattr(session, "get") else {}
+        except Exception:
+            board = {}
+        if not _routerboard_applicable(resource or {}, board or {}):
+            return _upgrade_result("ok", f"RouterOS {routeros}. RouterBOARD firmware is not applicable.", routeros, "not applicable")
+        current = str((board or {}).get("current-firmware") or "").strip()
+        upgrade = str((board or {}).get("upgrade-firmware") or "").strip()
+        if not upgrade or _same_firmware(current, upgrade):
+            return _upgrade_result(
+                "ok",
+                f"RouterOS {routeros}. RouterBOARD firmware is already {current or 'current'}.",
+                routeros,
+                "already current",
+                current,
+                upgrade,
+            )
+        try:
+            session.call("/system/routerboard", "upgrade")
             try:
-                session.close()
-            except Exception:
-                pass
-    return {"status": "started", "detail": "Upgrade installed. The router will reboot."}
+                session.call("/system", "reboot")
+            except Exception as exc:
+                if not _reboot_drop(exc, password):
+                    return _upgrade_result("failed", _scrub(str(exc), password), routeros, "failed", current, upgrade)
+        except Exception as exc:
+            return _upgrade_result("failed", _scrub(str(exc), password), routeros, "failed", current, upgrade)
+    finally:
+        _close(session)
+
+    try:
+        session = _wait_back(router, connector, username, password, wait_seconds, pause, ticks)
+    except TimeoutError as exc:
+        return _upgrade_result("failed", f"Router did not come back after the RouterBOARD upgrade. {exc}", routeros, "failed", current, upgrade)
+    try:
+        board = session.get("/system/routerboard") if hasattr(session, "get") else {}
+        resource = session.get("/system/resource") if hasattr(session, "get") else {}
+        version = str((resource or {}).get("version") or version).strip()
+        routeros = f"confirmed {version}" if version else routeros
+        now_current = str((board or {}).get("current-firmware") or "").strip()
+        now_upgrade = str((board or {}).get("upgrade-firmware") or upgrade).strip()
+        if _same_firmware(now_current, now_upgrade) and now_current:
+            return _upgrade_result("ok", f"RouterOS {routeros}. RouterBOARD firmware {now_current}.", routeros, f"upgraded to {now_current}", now_current, now_upgrade)
+        return _upgrade_result(
+            "failed",
+            f"RouterBOARD firmware is {now_current or 'unknown'}, upgrade firmware is {now_upgrade or 'unknown'}.",
+            routeros,
+            "failed",
+            now_current,
+            now_upgrade,
+        )
+    finally:
+        _close(session)
 
 
-def upgrade_many(routers, connector, username, password, data_dir: Path, batch: int = 1, channel: str | None = None) -> list[dict]:
+def upgrade_many(
+    routers,
+    connector,
+    username,
+    password,
+    data_dir: Path,
+    batch: int = 1,
+    channel: str | None = None,
+    routerboard: bool = True,
+    wait_seconds: int = 600,
+    sleep=None,
+    clock=None,
+) -> list[dict]:
     results = []
     stopped = False
     size = max(1, min(int(batch or 1), 50))
@@ -210,9 +288,20 @@ def upgrade_many(routers, connector, username, password, data_dir: Path, batch: 
                 results.append(_skipped(router))
                 continue
             try:
-                outcome = upgrade_router(router, connector, username, password, data_dir, channel=channel)
+                outcome = upgrade_router(
+                    router,
+                    connector,
+                    username,
+                    password,
+                    data_dir,
+                    channel=channel,
+                    routerboard=routerboard,
+                    wait_seconds=wait_seconds,
+                    sleep=sleep,
+                    clock=clock,
+                )
             except Exception as exc:
-                outcome = {"status": "failed", "detail": _scrub(str(exc), password)}
+                outcome = _upgrade_result("failed", _scrub(str(exc), password), "failed", "not started")
             results.append({"id": router["id"], "site_name": router["site_name"], **outcome})
             if outcome["status"] == "failed":
                 stopped = True
@@ -220,6 +309,68 @@ def upgrade_many(routers, connector, username, password, data_dir: Path, batch: 
             results.extend(_skipped(router) for router in pending)
             break
     return results
+
+
+def _upgrade_result(status: str, detail: str, routeros: str, routerboard: str, current: str = "", upgrade: str = "") -> dict:
+    return {
+        "status": status,
+        "detail": detail,
+        "routeros": routeros,
+        "routerboard": routerboard,
+        "current_firmware": current,
+        "upgrade_firmware": upgrade,
+    }
+
+
+def _routerboard_applicable(resource: dict, board: dict) -> bool:
+    arch = str(resource.get("architecture-name") or "").lower()
+    if arch in {"x86", "x86_64"}:
+        return False
+    name = str(board.get("model") or board.get("board-name") or resource.get("board-name") or "").lower()
+    if "chr" in name:
+        return False
+    return str(board.get("routerboard") or "").strip().lower() in {"yes", "true"}
+
+
+def _same_firmware(current: str, upgrade: str) -> bool:
+    if current.strip() == upgrade.strip():
+        return True
+    left = parse_version(current)
+    right = parse_version(upgrade)
+    return left is not None and left == right
+
+
+def _reboot_drop(exc: Exception, password: str) -> bool:
+    message = _scrub(str(exc), password).lower()
+    return any(word in message for word in ("timed out", "timeout", "connection", "reset", "closed"))
+
+
+def _wait_back(router, connector, username, password, timeout: int, sleep, clock):
+    started = clock()
+    deadline = started + max(0, int(timeout))
+    error = "timed out"
+    while True:
+        session = None
+        try:
+            session = _open(connector, router, username, password)
+            if hasattr(session, "get"):
+                session.get("/system/resource")
+            return session
+        except Exception as exc:
+            error = _scrub(str(exc), password) or error
+            _close(session)
+            if clock() >= deadline:
+                raise TimeoutError(error) from exc
+            remaining = deadline - clock()
+            sleep(2 if remaining > 2 else max(0, remaining))
+
+
+def _close(session) -> None:
+    if getattr(session, "close", None):
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 def _skipped(router) -> dict:

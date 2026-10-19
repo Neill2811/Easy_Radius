@@ -5,7 +5,7 @@
   <h1>Firmware</h1>
 </div>
 <div class="card">
-  <p class="help">Each router is compared with the latest version on its own channel: stable, long-term, testing, or development. Leave a box blank to fetch that channel from MikroTik. An upgrade saves <code>/export</code> first and installs on the router's current channel. It changes the channel only when you pick one below. Routers reboot. A failure stops the next batch.</p>
+  <p class="help">Each router is compared with the latest version on its own channel: stable, long-term, testing, or development. Leave a box blank to fetch that channel from MikroTik. An upgrade saves <code>/export</code> first and installs on the router's current channel. It changes the channel only when you pick one below. After the router comes back, RouterBOARD firmware is upgraded when the board has a newer firmware file and the box below is ticked. CHR and x86 have no RouterBOARD firmware. Routers reboot. A failure stops the next batch.</p>
   <ul>
     {% for name in channels %}
     <li>{{ name }}: <strong>{{ latest[name] or "not known" }}</strong></li>
@@ -28,7 +28,7 @@
   <form method="post" action="{{ url_for('firmware_upgrade') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <table>
-      <thead><tr><th></th><th>Site</th><th>Model</th><th>Arch</th><th>Channel</th><th>Version</th></tr></thead>
+      <thead><tr><th></th><th>Site</th><th>Model</th><th>Arch</th><th>Channel</th><th>Version</th><th>Current firmware</th><th>Upgrade firmware</th></tr></thead>
       <tbody>
         {% for row in rows %}
         <tr>
@@ -38,6 +38,8 @@
           <td>{{ row.facts.arch }}</td>
           <td>{{ row.channel or "unknown" }}</td>
           <td>{{ row.version }}{% if row.outdated %} <span class="tag warn">outdated</span>{% endif %}</td>
+          <td>{{ row.current_firmware or "—" }}</td>
+          <td>{{ row.upgrade_firmware or "—" }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -49,10 +51,30 @@
       <option value="{{ name }}">{{ name }}</option>
       {% endfor %}
     </select>
+    <label class="choice"><input type="checkbox" name="routerboard" value="yes" checked> Also upgrade RouterBOARD firmware</label>
+    <label for="wait_minutes">Wait for each reboot (minutes)</label>
+    <input id="wait_minutes" name="wait_minutes" type="number" min="1" max="60" value="10">
     <label for="batch">Routers at a time</label>
     <input id="batch" name="batch" type="number" min="1" max="50" value="1">
     <label class="choice"><input type="checkbox" name="confirm_many" value="yes"> I confirm an upgrade when more than one router is ticked.</label>
     <button type="submit">Upgrade ticked routers</button>
   </form>
+  {% if last_upgrade and last_upgrade.routers %}
+  <h2 class="section">Last upgrade {{ last_upgrade.at }}</h2>
+  <table>
+    <thead><tr><th>Site</th><th>RouterOS</th><th>RouterBOARD</th><th>Current</th><th>Upgrade</th></tr></thead>
+    <tbody>
+      {% for item in last_upgrade.routers %}
+      <tr>
+        <td>{{ item.site_name }}</td>
+        <td>{{ item.routeros or item.status }}</td>
+        <td>{{ item.routerboard or item.status }}</td>
+        <td>{{ item.current_firmware or "—" }}</td>
+        <td>{{ item.upgrade_firmware or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
 </div>
 {% endblock %}

@@ -38,10 +38,18 @@ def register_assets(app) -> None:
                     "facts": facts,
                     "version": version_label(facts.get("version")),
                     "channel": channel,
+                    "current_firmware": facts.get("current_firmware") or "",
+                    "upgrade_firmware": facts.get("upgrade_firmware") or "",
                     "outdated": bool(current) and channel in CHANNELS and outdated(facts.get("version"), current),
                 }
             )
-        return render_template("firmware.html", rows=rows, latest=latest, channels=CHANNELS)
+        return render_template(
+            "firmware.html",
+            rows=rows,
+            latest=latest,
+            channels=CHANNELS,
+            last_upgrade=state.get("last_upgrade"),
+        )
 
     @app.post("/firmware/latest")
     def firmware_latest():
@@ -97,6 +105,11 @@ def register_assets(app) -> None:
             flash(str(exc), "error")
             return redirect(url_for("firmware"))
         channel = request.form.get("channel", "").strip()
+        routerboard = request.form.get("routerboard") == "yes"
+        try:
+            wait_minutes = max(1, min(60, int(request.form.get("wait_minutes", "10"))))
+        except ValueError:
+            wait_minutes = 10
         results = upgrade_many(
             targets,
             _connector(app),
@@ -105,9 +118,14 @@ def register_assets(app) -> None:
             data_dir,
             batch,
             channel=channel or None,
+            routerboard=routerboard,
+            wait_seconds=wait_minutes * 60,
         )
         state["last_upgrade"] = {"at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "routers": results}
-        names = ", ".join(f"{item['site_name']} {item['status']}" for item in results)
+        names = ", ".join(
+            f"{item['site_name']} {item['status']} routerboard {item.get('routerboard', '')}".strip()
+            for item in results
+        )
         record(state, "firmware", f"Firmware upgrade by neill: {names}")
         save_state(data_dir, state)
         flash("Firmware upgrade finished. Routers that started an upgrade will reboot.", "ok")
