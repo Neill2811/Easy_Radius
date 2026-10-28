@@ -1,0 +1,78 @@
+# Runtime data: password hashes, router secrets, exports, and backups.
+# RouterOS exports live under data/router-backups/, data/firmware-backups/,
+# and data/automation/runs/ as *.rsc.
+data/
+backups/
+router-backups/
+firmware-backups/
+*.rsc
+
+# Logs
+*.log
+logs/
+log/
+
+# Python caches
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.cache/
+htmlcov/
+.coverage
+coverage.xml
+*.py[cod]
+
+# Virtualenvs and local secrets
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# Build and package output
+build/
+dist/
+.eggs/
+*.egg-info/
+
+# JavaScript dependencies, if any are added later
+node_modules/
+
+# Large static assets. Hand-written CSS/JS and the small favicon SVG stay visible.
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.ico
+*.bmp
+*.woff
+*.woff2
+*.ttf
+*.otf
+*.eot
+*.min.js
+*.min.css
+vendor/
+vendored/
+docs/screenshots/
+
+# Design mockups
+mockups/
+*.fig
+*.sketch
+*.xd
+
+# Lock files and generated archives. requirements.txt stays; it is the dependency list.
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+poetry.lock
+Pipfile.lock
+uv.lock
+composer.lock
+*.tgz
+*.tar.gz
+*.zip
