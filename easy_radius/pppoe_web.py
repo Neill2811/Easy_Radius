@@ -13,6 +13,7 @@ from easy_radius.pppoe_failures import (
     aggregates,
     due,
     mark_removed,
+    migrate_stores,
     poll_routers,
     poll_status,
     settings_of,
@@ -23,6 +24,7 @@ _STARTED = False
 
 
 def register_pppoe(app) -> None:
+    migrate_stores(app.config["DATA_DIR"])
     if not app.config.get("TESTING"):
         _start(app)
 

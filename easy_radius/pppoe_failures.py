@@ -1,14 +1,20 @@
-"""PPPoE failure lines read from routers, kept on this server.
+"""PPPoE failure counts read from routers, kept on this server.
 
 The poll only prints /log and /ppp/active. It does not change a router.
-Secrets are not stored. Times are kept in UTC and shown in SAST.
+Secrets are not stored. Each router has one small file: totals per
+username and MAC, hourly buckets for the recent window, and a few raw
+lines. Times are kept in UTC and shown in SAST.
 """
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import os
 import re
+import tempfile
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -41,6 +47,16 @@ _FAILURES = (
     "terminating",
     "failed",
 )
+_VERSION = 2
+_HOUR_KEEP = 48
+_LINE_KEEP = 10
+_PRUNE_DAYS = 30
+_CURSOR_CAP = 2048
+_VALUE_CAP = 4_000_000
+_LOCK = threading.RLock()
+_CACHE: dict[str, tuple[int, int, dict]] = {}
+_POLL_MEM: dict[str, dict] = {}
+_ROW_CACHE: dict[str, object] = {"sig": None, "rows": None}
 
 
 def default_settings() -> dict:
@@ -150,7 +166,7 @@ def active_identity(rows: list[dict]) -> tuple[set[str], set[str]]:
             macs.add(_normal_mac(token))
         elif token:
             users.add(token.lower())
-        caller = row.get("caller-id") or row.get("caller-id") or ""
+        caller = row.get("caller-id") or ""
         found = _MAC.search(str(caller))
         if found:
             macs.add(_normal_mac(found.group(0)))
@@ -159,32 +175,41 @@ def active_identity(rows: list[dict]) -> tuple[set[str], set[str]]:
 
 def poll_routers(state: dict, data_dir: Path, connector, now: datetime | None = None) -> dict:
     """Read each enabled router. A failure on one router does not stop the rest."""
-    moment = now or datetime.now(timezone.utc)
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=timezone.utc)
+    moment = _as_utc(now)
     settings = settings_of(state)
     from easy_radius.automation import AutomationError, account_password
 
-    routers = [router for router in (state.get("routers") or []) if isinstance(router, dict) and router.get("enabled", True) is not False]
+    routers = [
+        router
+        for router in (state.get("routers") or [])
+        if isinstance(router, dict) and router.get("enabled", True) is not False
+    ]
     try:
-        username, password = account_password(state)
+        _username, password = account_password(state)
     except AutomationError as exc:
         detail = _scrub(str(exc), "")
         for router in routers:
-            _write_poll(data_dir, router, "failed", detail, moment)
+            _record_poll(data_dir, router, "failed", detail, moment)
         settings["last_run"] = _iso(moment)
         state["pppoe_poll"] = settings
         return settings
     for router in routers:
         session = None
         try:
-            session = _open(connector, router, username, password)
+            session = _open(connector, router, _username, password)
             logs = session.rows("/log") if hasattr(session, "rows") else []
             active = session.rows("/ppp/active") if hasattr(session, "rows") else []
-            ingest(data_dir, str(router.get("id") or ""), logs, active, moment, password)
-            _write_poll(data_dir, router, "ok", "", moment)
+            ingest(
+                data_dir,
+                str(router.get("id") or ""),
+                logs,
+                active,
+                moment,
+                password,
+                poll=("ok", ""),
+            )
         except Exception as exc:
-            _write_poll(data_dir, router, "failed", _scrub(str(exc), password), moment)
+            _record_poll(data_dir, router, "failed", _scrub(str(exc), password), moment)
         finally:
             close = getattr(session, "close", None)
             if close:
@@ -197,107 +222,94 @@ def poll_routers(state: dict, data_dir: Path, connector, now: datetime | None = 
     return settings
 
 
-def ingest(data_dir: Path, router_id: str, logs: list[dict], active: list[dict], now: datetime, password: str = "") -> dict:
-    store = _load(data_dir, router_id)
-    seen = set(store.get("seen") or [])
-    events = list(store.get("events") or [])
-    for row in logs or []:
-        if not isinstance(row, dict) or not topics_include_ppp(row.get("topics")):
-            continue
-        message = _scrub(str(row.get("message") or ""), password)
-        parsed = parse_failure(message)
-        if parsed is None:
-            continue
-        raw_time = str(row.get("time") or "")
-        key = raw_time + "\n" + message
-        if key in seen:
-            continue
-        seen.add(key)
-        username, mac = parsed
-        when = parse_log_time(raw_time, now)
-        events.append(
-            {
-                "key": key,
-                "time": raw_time,
-                "at": _iso(when) if when else _iso(now),
-                "message": message,
-                "username": username,
-                "mac": mac,
-            }
-        )
-    users, macs = active_identity(active)
-    cleared = dict(store.get("cleared") or {})
-    for event in events:
-        if _is_online(event.get("username") or "", event.get("mac") or "", users, macs):
-            identity = _identity(event.get("username") or "", event.get("mac") or "")
-            cleared[identity] = _iso(now)
-    cutoff = _iso(now - timedelta(days=30))
-    events = [event for event in events if str(event.get("at") or "") >= cutoff]
-    seen = {event["key"] for event in events if event.get("key")}
-    store["events"] = events
-    store["seen"] = sorted(seen)
-    store["cleared"] = {key: value for key, value in cleared.items() if value >= cutoff}
-    _save(data_dir, router_id, store)
-    return store
+def ingest(
+    data_dir: Path,
+    router_id: str,
+    logs: list[dict],
+    active: list[dict],
+    now: datetime,
+    password: str = "",
+    *,
+    poll: tuple[str, str] | None = None,
+) -> dict:
+    """Fold one router's log into its aggregate file. Skip the write when nothing changed."""
+    moment = _as_utc(now)
+    if not _SAFE_ID.fullmatch(router_id or ""):
+        return _empty()
+    with _LOCK:
+        current = _load(data_dir, router_id)
+        store = copy.deepcopy(current)
+        cursor_at = _parse_iso(store["cursor"].get("at") or "")
+        cursor_ids = set(store["cursor"].get("ids") or [])
+        rows = _take_lines(logs, moment, password, cursor_at, cursor_ids)
+        _apply_rows(store, rows, moment)
+        users, macs = active_identity(active)
+        _clear_online(store, users, macs, moment)
+        if poll is not None:
+            _stage_poll(data_dir, router_id, store, poll[0], poll[1], moment)
+        _prune_store(store, moment)
+        if store != current:
+            _save(data_dir, router_id, store)
+        return store
 
 
 def mark_removed(data_dir: Path, router_id: str, username: str, mac: str, now: datetime | None = None) -> None:
-    moment = now or datetime.now(timezone.utc)
-    store = _load(data_dir, router_id)
-    removed = dict(store.get("removed") or {})
-    removed[_identity(username, mac)] = _iso(moment)
-    store["removed"] = removed
-    _save(data_dir, router_id, store)
+    moment = _as_utc(now)
+    if not _SAFE_ID.fullmatch(router_id or ""):
+        raise ValueError("Unknown router")
+    with _LOCK:
+        current = _load(data_dir, router_id)
+        store = copy.deepcopy(current)
+        identity = _identity(username, mac)
+        entry = store["entries"].get(identity)
+        if entry is None:
+            entry = _blank_entry(username, mac)
+            store["entries"][identity] = entry
+        entry["removed"] = _iso(moment)
+        _drop_hidden(entry, _cutoff(entry))
+        _prune_store(store, moment)
+        if store != current:
+            _save(data_dir, router_id, store)
 
 
 def aggregates(data_dir: Path, state: dict, now: datetime | None = None) -> list[dict]:
     """One row per router, username, and MAC, counting failures in the last 24 hours."""
-    moment = now or datetime.now(timezone.utc)
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=timezone.utc)
-    day = _iso(moment - timedelta(hours=24))
-    names = {str(router.get("id")): router.get("site_name") or router.get("id") for router in (state.get("routers") or []) if isinstance(router, dict)}
-    rows = []
-    for path in _files(data_dir):
-        router_id = path.stem
-        store = _read(path)
-        grouped: dict[str, dict] = {}
-        for event in store.get("events") or []:
-            if not isinstance(event, dict):
-                continue
-            identity = _identity(event.get("username") or "", event.get("mac") or "")
-            bucket = grouped.setdefault(
-                identity,
-                {"username": event.get("username") or "", "mac": event.get("mac") or "", "events": []},
-            )
-            bucket["events"].append(event)
-        removed = store.get("removed") or {}
-        cleared = store.get("cleared") or {}
-        for identity, bucket in grouped.items():
-            cutoff = max(str(removed.get(identity) or ""), str(cleared.get(identity) or ""))
-            kept = [event for event in bucket["events"] if str(event.get("at") or "") > cutoff]
-            recent = [event for event in kept if str(event.get("at") or "") >= day]
-            if not kept:
-                continue
-            stamps = sorted(str(event.get("at") or "") for event in recent or kept)
-            last = stamps[-1] if recent else ""
-            first = sorted(str(event.get("at") or "") for event in kept)[0]
-            lines = sorted(kept, key=lambda event: str(event.get("at") or ""), reverse=True)[:12]
-            rows.append(
-                {
-                    "router_id": router_id,
-                    "site_name": names.get(router_id) or router_id,
-                    "username": bucket["username"],
-                    "mac": bucket["mac"],
-                    "count": len(recent),
-                    "first_seen": format_sast(first),
-                    "last_seen": format_seen(last or stamps[-1], moment),
-                    "last_at": last or stamps[-1],
-                    "lines": [{"time": format_sast(event.get("at")), "message": event.get("message") or ""} for event in lines],
-                }
-            )
-    rows.sort(key=lambda row: (-row["count"], row["site_name"], row["username"], row["mac"]))
-    return rows
+    moment = _as_utc(now)
+    with _LOCK:
+        loaded = []
+        sig_parts = []
+        for path in _files(data_dir):
+            loaded.append((path.stem, _read(path)))
+            try:
+                st = path.stat()
+                sig_parts.append((str(path), st.st_mtime_ns, st.st_size))
+            except OSError:
+                sig_parts.append((str(path), 0, 0))
+        names = {}
+        for router in state.get("routers") or []:
+            if isinstance(router, dict):
+                names[str(router.get("id"))] = router.get("site_name") or router.get("id")
+        local = moment.astimezone(SAST)
+        sig = (
+            tuple(sig_parts),
+            tuple(sorted((key, str(value)) for key, value in names.items())),
+            local.strftime("%Y-%m-%d"),
+            _hour_key(moment),
+        )
+        if _ROW_CACHE.get("sig") == sig:
+            return _ROW_CACHE["rows"]
+        window = _window_hours(moment)
+        horizon = _iso(moment - timedelta(days=_PRUNE_DAYS))
+        rows = []
+        for router_id, store in loaded:
+            for entry in (store.get("entries") or {}).values():
+                row = _row(router_id, names, entry, moment, window, horizon)
+                if row:
+                    rows.append(row)
+        rows.sort(key=lambda row: (-row["count"], row["site_name"], row["username"], row["mac"]))
+        _ROW_CACHE["sig"] = sig
+        _ROW_CACHE["rows"] = rows
+        return rows
 
 
 def hot_entries(data_dir: Path, state: dict, now: datetime | None = None) -> list[dict]:
@@ -305,10 +317,9 @@ def hot_entries(data_dir: Path, state: dict, now: datetime | None = None) -> lis
     return [row for row in aggregates(data_dir, state, now) if row["count"] >= threshold]
 
 
-def attention_lines(data_dir: Path, state: dict, now: datetime) -> list[dict]:
-    moment = datetime.fromtimestamp(now, timezone.utc) if isinstance(now, (int, float)) else now
+def attention_lines(data_dir: Path, state: dict, now) -> list[dict]:
     lines = []
-    for row in hot_entries(data_dir, state, moment):
+    for row in hot_entries(data_dir, state, now):
         who = row["username"] or "unknown user"
         mac = f", MAC {row['mac']}" if row["mac"] else ""
         lines.append(
@@ -324,20 +335,18 @@ def attention_lines(data_dir: Path, state: dict, now: datetime) -> list[dict]:
 def poll_status(data_dir: Path, state: dict) -> list[dict]:
     names = {str(router.get("id")): router for router in (state.get("routers") or []) if isinstance(router, dict)}
     found = []
-    seen = set()
-    for router_id, router in names.items():
-        store = _load(data_dir, router_id) if _SAFE_ID.fullmatch(router_id) else {}
-        poll = store.get("poll") if isinstance(store.get("poll"), dict) else {}
-        found.append(
-            {
-                "router_id": router_id,
-                "site_name": router.get("site_name") or router_id,
-                "status": poll.get("status") or "",
-                "detail": poll.get("detail") or "",
-                "at": format_sast(poll.get("at")),
-            }
-        )
-        seen.add(router_id)
+    with _LOCK:
+        for router_id, router in names.items():
+            poll = _poll_view(data_dir, router_id)
+            found.append(
+                {
+                    "router_id": router_id,
+                    "site_name": router.get("site_name") or router_id,
+                    "status": poll.get("status") or "",
+                    "detail": poll.get("detail") or "",
+                    "at": format_sast(poll.get("at")),
+                }
+            )
     found.sort(key=lambda row: (row["status"] != "failed", row["site_name"]))
     return found
 
@@ -355,6 +364,20 @@ def due(state: dict, now: datetime) -> bool:
     return now - previous >= timedelta(minutes=settings["interval_minutes"])
 
 
+def migrate_stores(data_dir: Path, now: datetime | None = None) -> None:
+    """Convert a previous event log in place. A missing directory is an empty start."""
+    folder = Path(data_dir) / "pppoe-failures"
+    if not folder.is_dir():
+        return
+    moment = _as_utc(now)
+    for path in sorted(folder.glob("*.json")):
+        if not _SAFE_ID.fullmatch(path.stem):
+            continue
+        with _LOCK:
+            if _needs_migration(path):
+                _migrate_file(path, moment)
+
+
 def format_sast(value) -> str:
     moment = _parse_iso(str(value or ""))
     if moment is None:
@@ -370,6 +393,287 @@ def format_seen(value, now: datetime) -> str:
     if local.date() == now.astimezone(SAST).date():
         return local.strftime("%H:%M")
     return local.strftime("%Y-%m-%d %H:%M")
+
+
+def _as_utc(now) -> datetime:
+    if isinstance(now, (int, float)):
+        return datetime.fromtimestamp(now, timezone.utc)
+    if now is None:
+        return datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        return now.replace(tzinfo=timezone.utc)
+    return now
+
+
+def _record_poll(data_dir: Path, router: dict, status: str, detail: str, now: datetime) -> None:
+    ingest(data_dir, str(router.get("id") or ""), [], [], now, poll=(status, detail))
+
+
+def _stage_poll(data_dir: Path, router_id: str, store: dict, status: str, detail: str, now: datetime) -> None:
+    record = {"at": _iso(now), "status": status, "detail": str(detail or "")[:300]}
+    _POLL_MEM[_mem_key(data_dir, router_id)] = record
+    previous = store.get("poll") or {}
+    if previous.get("status") != record["status"] or previous.get("detail") != record["detail"] or not previous.get("at"):
+        store["poll"] = record
+
+
+def _poll_view(data_dir: Path, router_id: str) -> dict:
+    mem = _POLL_MEM.get(_mem_key(data_dir, router_id))
+    if mem:
+        return mem
+    if not _SAFE_ID.fullmatch(router_id or ""):
+        return {}
+    return _load(data_dir, router_id).get("poll") or {}
+
+
+def _mem_key(data_dir: Path, router_id: str) -> str:
+    try:
+        root = str(Path(data_dir).resolve())
+    except OSError:
+        root = str(data_dir)
+    return root + "\0" + router_id
+
+
+def _take_lines(logs, now: datetime, password: str, cursor_at: datetime | None, cursor_ids: set[str]) -> list[tuple]:
+    rows = []
+    seen: set[str] = set()
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    for row in logs or []:
+        if not isinstance(row, dict) or not topics_include_ppp(row.get("topics")):
+            continue
+        message = _scrub(str(row.get("message") or ""), password)
+        if len(message) > 2000:
+            message = message[:2000]
+        parsed = parse_failure(message)
+        if parsed is None:
+            continue
+        raw_time = str(row.get("time") or "")
+        digest = _digest(raw_time + "\n" + message)
+        if digest in seen:
+            continue
+        seen.add(digest)
+        when = parse_log_time(raw_time, now)
+        if when is None:
+            when = epoch if cursor_at is not None or digest in cursor_ids else now
+        username, mac = parsed
+        rows.append((when, digest, username, mac, message[:500]))
+    return rows
+
+
+def _apply_rows(store: dict, rows: list[tuple], now: datetime) -> None:
+    cursor_at = _parse_iso(store["cursor"].get("at") or "")
+    ids = set(store["cursor"].get("ids") or [])
+    horizon = now - timedelta(days=_PRUNE_DAYS)
+    for when, digest, username, mac, message in rows:
+        if digest in ids or (cursor_at is not None and when < cursor_at) or when < horizon:
+            continue
+        _add_failure(store, username, mac, when, message)
+    _set_cursor(store, rows)
+
+
+def _set_cursor(store: dict, rows: list[tuple]) -> None:
+    if not rows:
+        return
+    built_at_dt = max(item[0] for item in rows)
+    ranked = sorted(rows, key=lambda item: (item[0], item[1]), reverse=True)
+    ids: list[str] = []
+    seen: set[str] = set()
+    for when, digest, *_rest in ranked:
+        if digest in seen:
+            continue
+        seen.add(digest)
+        ids.append(digest)
+        if len(ids) >= _CURSOR_CAP:
+            break
+    ids.sort()
+    current_at = _parse_iso(store["cursor"].get("at") or "")
+    if current_at is not None and built_at_dt < current_at:
+        return
+    if current_at is not None and built_at_dt == current_at:
+        union = set(store["cursor"].get("ids") or []) | set(ids)
+        merged = ids if len(union) > _CURSOR_CAP else sorted(union)
+        if store["cursor"].get("ids") != merged:
+            store["cursor"]["ids"] = merged
+        return
+    store["cursor"] = {"at": _iso(built_at_dt), "ids": ids}
+
+
+def _add_failure(store: dict, username: str, mac: str, when: datetime, message: str) -> None:
+    identity = _identity(username, mac)
+    entry = store["entries"].get(identity)
+    if entry is None:
+        entry = _blank_entry(username, mac)
+        store["entries"][identity] = entry
+    at = _iso(when)
+    cutoff = _cutoff(entry)
+    if cutoff and at <= cutoff:
+        return
+    if cutoff and (entry.get("last") or "") <= cutoff:
+        entry["first"] = at
+        entry["hours"] = {}
+        entry["lines"] = []
+    elif not entry.get("first") or at < entry["first"]:
+        entry["first"] = at
+    if not entry.get("last") or at > entry["last"]:
+        entry["last"] = at
+    entry["total"] = int(entry.get("total") or 0) + 1
+    hour = _hour_key(when)
+    entry["hours"][hour] = int(entry["hours"].get(hour) or 0) + 1
+    _push_line(entry, at, message)
+
+
+def _push_line(entry: dict, at: str, message: str) -> None:
+    lines = entry["lines"]
+    lines.append({"at": at, "message": message})
+    lines.sort(key=lambda line: line.get("at") or "")
+    if len(lines) > _LINE_KEEP:
+        del lines[:-_LINE_KEEP]
+
+
+def _clear_online(store: dict, users: set[str], macs: set[str], now: datetime) -> None:
+    if not users and not macs:
+        return
+    moment = _iso(now)
+    for entry in store["entries"].values():
+        if not _is_online(entry.get("username") or "", entry.get("mac") or "", users, macs):
+            continue
+        cleared = entry.get("cleared") or ""
+        last = entry.get("last") or ""
+        if cleared and last <= cleared and not entry.get("hours") and not entry.get("lines"):
+            continue
+        entry["cleared"] = moment
+        _drop_hidden(entry, max(entry.get("removed") or "", moment))
+
+
+def _drop_hidden(entry: dict, cutoff: str) -> None:
+    if not cutoff:
+        return
+    kept = {}
+    for key, count in (entry.get("hours") or {}).items():
+        start = _hour_start_iso(str(key))
+        if start and start > cutoff:
+            kept[str(key)] = int(count)
+    entry["hours"] = kept
+    entry["lines"] = [line for line in entry.get("lines") or [] if str(line.get("at") or "") > cutoff]
+
+
+def _cutoff(entry: dict) -> str:
+    return max(entry.get("removed") or "", entry.get("cleared") or "")
+
+
+def _prune_store(store: dict, now: datetime) -> None:
+    cutoff = _iso(now - timedelta(days=_PRUNE_DAYS))
+    earliest = _hour_key(now - timedelta(hours=_HOUR_KEEP))
+    latest = _hour_key(now + timedelta(hours=2))
+    drop = []
+    for key, entry in store["entries"].items():
+        last = entry.get("last") or entry.get("removed") or ""
+        if not last or last < cutoff:
+            drop.append(key)
+            continue
+        hours = {
+            str(hour): int(count)
+            for hour, count in (entry.get("hours") or {}).items()
+            if earliest <= str(hour) <= latest and _as_int(count) > 0
+        }
+        if hours != entry.get("hours"):
+            entry["hours"] = hours
+        lines = [
+            {"at": str(line.get("at") or ""), "message": str(line.get("message") or "")[:500]}
+            for line in (entry.get("lines") or [])
+            if isinstance(line, dict) and str(line.get("at") or "") >= cutoff
+        ]
+        lines.sort(key=lambda line: line["at"])
+        lines = lines[-_LINE_KEEP:]
+        if lines != entry.get("lines"):
+            entry["lines"] = lines
+    for key in drop:
+        del store["entries"][key]
+
+
+def _row(router_id: str, names: dict, entry: dict, moment: datetime, window: set[str], horizon: str) -> dict | None:
+    if not isinstance(entry, dict):
+        return None
+    last = str(entry.get("last") or "")
+    if not last or last < horizon:
+        return None
+    cutoff = _cutoff(entry)
+    if cutoff and last <= cutoff:
+        return None
+    count = 0
+    for hour, tally in (entry.get("hours") or {}).items():
+        if str(hour) not in window:
+            continue
+        end = _hour_end_iso(str(hour))
+        if cutoff and end and end <= cutoff:
+            continue
+        count += _as_int(tally)
+    lines = []
+    ordered = sorted(entry.get("lines") or [], key=lambda line: str(line.get("at") or ""), reverse=True)
+    for line in ordered:
+        if not isinstance(line, dict):
+            continue
+        at = str(line.get("at") or "")
+        if cutoff and at <= cutoff:
+            continue
+        lines.append({"time": format_sast(at), "message": line.get("message") or ""})
+        if len(lines) >= _LINE_KEEP:
+            break
+    return {
+        "router_id": router_id,
+        "site_name": names.get(router_id) or router_id,
+        "username": entry.get("username") or "",
+        "mac": entry.get("mac") or "",
+        "count": count,
+        "first_seen": format_sast(entry.get("first") or last),
+        "last_seen": format_seen(last, moment),
+        "last_at": last,
+        "lines": lines,
+    }
+
+
+def _window_hours(now: datetime) -> set[str]:
+    end = now.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    start = end - timedelta(hours=24)
+    stop = end + timedelta(hours=1)
+    keys = set()
+    hour = start
+    while hour <= stop:
+        keys.add(_hour_key(hour))
+        hour += timedelta(hours=1)
+    return keys
+
+
+def _hour_key(when: datetime) -> str:
+    return when.astimezone(timezone.utc).strftime("%Y%m%d%H")
+
+
+def _hour_start(key: str) -> datetime | None:
+    try:
+        return datetime.strptime(str(key), "%Y%m%d%H").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _hour_start_iso(key: str) -> str:
+    start = _hour_start(key)
+    return _iso(start) if start else ""
+
+
+def _hour_end_iso(key: str) -> str:
+    start = _hour_start(key)
+    return _iso(start + timedelta(hours=1)) if start else ""
+
+
+def _digest(text: str) -> str:
+    return hashlib.blake2s(text.encode("utf-8"), digest_size=8).hexdigest()
+
+
+def _as_int(value) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _identity(username: str, mac: str) -> str:
@@ -401,7 +705,7 @@ def _iso(moment: datetime) -> str:
 
 
 def _parse_iso(value: str) -> datetime | None:
-    text = value.strip()
+    text = str(value or "").strip()
     if not text:
         return None
     if text.endswith("Z"):
@@ -429,6 +733,356 @@ def _open(connector, router, username, password):
         return connector(router["ip"], username, password)
 
 
+class _CursorBuild:
+    """Newest failure hashes seen while streaming an old store. Bounded."""
+
+    def __init__(self) -> None:
+        self.at: datetime | None = None
+        self._rows: list[tuple[datetime, str]] = []
+
+    def note(self, when: datetime, digest: str) -> None:
+        if self.at is None or when > self.at:
+            self.at = when
+        self._rows.append((when, digest))
+        if len(self._rows) > _CURSOR_CAP * 2:
+            self._compact()
+
+    def _compact(self) -> None:
+        self._rows.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        kept = []
+        seen: set[str] = set()
+        for item in self._rows:
+            if item[1] in seen:
+                continue
+            seen.add(item[1])
+            kept.append(item)
+            if len(kept) >= _CURSOR_CAP:
+                break
+        self._rows = kept
+
+    def export(self) -> dict | None:
+        if self.at is None:
+            return None
+        self._compact()
+        ids = sorted({digest for _when, digest in self._rows})
+        return {"at": _iso(self.at), "ids": ids}
+
+
+class _Reader:
+    """Pull JSON values from a large pretty-printed file without holding it all."""
+
+    def __init__(self, path: Path) -> None:
+        self._fh = path.open("r", encoding="utf-8", errors="replace")
+        self._buf = ""
+        self._dec = json.JSONDecoder()
+        self._eof = False
+
+    def close(self) -> None:
+        self._fh.close()
+
+    def _more(self) -> bool:
+        if self._eof:
+            return False
+        chunk = self._fh.read(65536)
+        if not chunk:
+            self._eof = True
+            return False
+        if len(self._buf) + len(chunk) > _VALUE_CAP:
+            raise ValueError("value too large")
+        self._buf += chunk
+        return True
+
+    def _skip_ws(self) -> None:
+        while True:
+            stripped = self._buf.lstrip()
+            if stripped:
+                self._buf = stripped
+                return
+            self._buf = ""
+            if not self._more():
+                return
+
+    def peek(self) -> str:
+        self._skip_ws()
+        return self._buf[:1]
+
+    def take(self, token: str) -> None:
+        self._skip_ws()
+        if not self._buf.startswith(token) and self._more():
+            self._skip_ws()
+        if not self._buf.startswith(token):
+            raise ValueError("expected " + token)
+        self._buf = self._buf[len(token) :]
+
+    def value(self):
+        self._skip_ws()
+        while not self._buf:
+            if not self._more():
+                raise ValueError("unexpected end")
+            self._skip_ws()
+        if self._buf[0] in "-0123456789":
+            while not self._eof and not any(ch in self._buf for ch in ",}] \n\r\t"):
+                if not self._more():
+                    break
+            parsed, end = self._dec.raw_decode(self._buf)
+            self._buf = self._buf[end :]
+            return parsed
+        while True:
+            try:
+                parsed, end = self._dec.raw_decode(self._buf)
+            except json.JSONDecodeError:
+                if not self._more():
+                    raise
+                continue
+            self._buf = self._buf[end :]
+            return parsed
+
+
+def _skip_value(reader: _Reader) -> None:
+    char = reader.peek()
+    if char == "{":
+        reader.take("{")
+        if reader.peek() == "}":
+            reader.take("}")
+            return
+        while True:
+            reader.value()
+            reader.take(":")
+            _skip_value(reader)
+            if reader.peek() == ",":
+                reader.take(",")
+                if reader.peek() == "}":
+                    reader.take("}")
+                    return
+                continue
+            reader.take("}")
+            return
+    if char == "[":
+        reader.take("[")
+        if reader.peek() == "]":
+            reader.take("]")
+            return
+        while True:
+            _skip_value(reader)
+            if reader.peek() == ",":
+                reader.take(",")
+                if reader.peek() == "]":
+                    reader.take("]")
+                    return
+                continue
+            reader.take("]")
+            return
+    reader.value()
+
+
+def _read_array(reader: _Reader, on_item) -> None:
+    reader.take("[")
+    if reader.peek() == "]":
+        reader.take("]")
+        return
+    while True:
+        on_item(reader.value())
+        char = reader.peek()
+        if char == ",":
+            reader.take(",")
+            if reader.peek() == "]":
+                reader.take("]")
+                return
+            continue
+        reader.take("]")
+        return
+
+
+def _walk(path: Path, on_key) -> None:
+    reader = _Reader(path)
+    try:
+        if reader.peek() != "{":
+            raise ValueError("not an object")
+        reader.take("{")
+        if reader.peek() == "}":
+            reader.take("}")
+            return
+        while True:
+            key = reader.value()
+            reader.take(":")
+            on_key(str(key), reader)
+            if reader.peek() == ",":
+                reader.take(",")
+                if reader.peek() == "}":
+                    reader.take("}")
+                    return
+                continue
+            reader.take("}")
+            return
+    finally:
+        reader.close()
+
+
+def _scan_side(path: Path) -> tuple[dict, dict, dict]:
+    removed: dict = {}
+    cleared: dict = {}
+    poll: dict = {}
+
+    def on_key(key: str, reader: _Reader) -> None:
+        nonlocal removed, cleared, poll
+        if key == "removed":
+            found = reader.value()
+            if isinstance(found, dict):
+                removed = {str(name): str(when) for name, when in found.items()}
+        elif key == "cleared":
+            found = reader.value()
+            if isinstance(found, dict):
+                cleared = {str(name): str(when) for name, when in found.items()}
+        elif key == "poll":
+            found = reader.value()
+            if isinstance(found, dict):
+                poll = found
+        else:
+            _skip_value(reader)
+
+    try:
+        _walk(path, on_key)
+    except Exception:
+        return removed, cleared, poll
+    return removed, cleared, poll
+
+
+def _fold_event(store: dict, event: dict, removed: dict, cleared: dict, cursor: _CursorBuild, visible: set[str], now: datetime) -> None:
+    if not isinstance(event, dict):
+        return
+    username = str(event.get("username") or "")
+    mac = str(event.get("mac") or "")
+    if not username and not mac:
+        return
+    at = _parse_iso(str(event.get("at") or ""))
+    if at is None:
+        return
+    message = str(event.get("message") or "")[:500]
+    key = event.get("key")
+    if not isinstance(key, str) or not key:
+        key = f"{event.get('time') or ''}\n{message}"
+    cursor.note(at, _digest(key))
+    if at < now - timedelta(days=_PRUNE_DAYS):
+        return
+    identity = _identity(username, mac)
+    entry = store["entries"].get(identity)
+    if entry is None:
+        entry = _blank_entry(username, mac)
+        entry["removed"] = str(removed.get(identity) or "")
+        entry["cleared"] = str(cleared.get(identity) or "")
+        store["entries"][identity] = entry
+    cutoff = _cutoff(entry)
+    stamp = _iso(at)
+    if cutoff and stamp <= cutoff:
+        entry["total"] = int(entry.get("total") or 0) + 1
+        if not entry.get("last") or stamp > entry["last"]:
+            entry["last"] = stamp
+        if not entry.get("first"):
+            entry["first"] = stamp
+        return
+    fresh = bool(cutoff) and identity not in visible and (not entry.get("last") or entry["last"] <= cutoff)
+    if fresh:
+        entry["first"] = stamp
+        entry["hours"] = {}
+        entry["lines"] = []
+    elif not entry.get("first") or stamp < entry["first"]:
+        entry["first"] = stamp
+    visible.add(identity)
+    if not entry.get("last") or stamp > entry["last"]:
+        entry["last"] = stamp
+    entry["total"] = int(entry.get("total") or 0) + 1
+    hour = _hour_key(at)
+    entry["hours"][hour] = int(entry["hours"].get(hour) or 0) + 1
+    _push_line(entry, stamp, message)
+
+
+def _apply_lone_marks(store: dict, removed: dict, cleared: dict) -> None:
+    for identity, when in (removed or {}).items():
+        stamp = str(when or "")
+        if not stamp:
+            continue
+        entry = store["entries"].get(str(identity))
+        if entry is None:
+            username, _sep, mac = str(identity).partition("\n")
+            entry = _blank_entry(username, mac)
+            entry["removed"] = stamp
+            store["entries"][str(identity)] = entry
+        elif not entry.get("removed"):
+            entry["removed"] = stamp
+    for identity, when in (cleared or {}).items():
+        entry = store["entries"].get(str(identity))
+        if entry is not None and when and not entry.get("cleared"):
+            entry["cleared"] = str(when)
+
+
+def _fold_file(path: Path, removed: dict, cleared: dict, poll: dict, now: datetime) -> dict:
+    store = _empty()
+    record = _poll_record(poll)
+    if record:
+        store["poll"] = record
+    cursor = _CursorBuild()
+    visible: set[str] = set()
+
+    def on_key(key: str, reader: _Reader) -> None:
+        if key == "events":
+            _read_array(reader, lambda event: _fold_event(store, event, removed, cleared, cursor, visible, now))
+        else:
+            _skip_value(reader)
+
+    try:
+        _walk(path, on_key)
+    except Exception:
+        if not store["entries"] and cursor.at is None:
+            raise
+    exported = cursor.export()
+    if exported:
+        store["cursor"] = exported
+    _apply_lone_marks(store, removed, cleared)
+    _prune_store(store, now)
+    return store
+
+
+def _marks_only(removed: dict, cleared: dict, poll: dict, now: datetime) -> dict:
+    store = _empty()
+    record = _poll_record(poll)
+    if record:
+        store["poll"] = record
+    _apply_lone_marks(store, removed, cleared)
+    _prune_store(store, now)
+    return store
+
+
+def _migrate_file(path: Path, now: datetime) -> None:
+    if not _needs_migration(path):
+        return
+    removed, cleared, poll = _scan_side(path)
+    try:
+        store = _fold_file(path, removed, cleared, poll, now)
+    except Exception:
+        store = _marks_only(removed, cleared, poll, now)
+    _save(path.parent.parent, path.stem, store)
+
+
+def _needs_migration(path: Path) -> bool:
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return False
+    if size == 0:
+        return False
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            head = handle.read(65536)
+    except OSError:
+        return False
+    lead = head.lstrip()
+    if lead.startswith('{"v":2') or lead.startswith('{"v": 2'):
+        return False
+    if size > 65536:
+        return True
+    return any(token in head for token in ('"events"', '"seen"', '"cleared"', '"removed"'))
+
+
 def _folder(data_dir: Path) -> Path:
     path = Path(data_dir) / "pppoe-failures"
     path.mkdir(parents=True, exist_ok=True)
@@ -450,7 +1104,89 @@ def _files(data_dir: Path) -> list[Path]:
 
 
 def _empty() -> dict:
-    return {"events": [], "seen": [], "cleared": {}, "removed": {}, "poll": {}}
+    return {"v": _VERSION, "cursor": {"at": "", "ids": []}, "entries": {}, "poll": {}}
+
+
+def _blank_entry(username: str, mac: str) -> dict:
+    return {
+        "username": username,
+        "mac": mac,
+        "total": 0,
+        "first": "",
+        "last": "",
+        "removed": "",
+        "cleared": "",
+        "hours": {},
+        "lines": [],
+    }
+
+
+def _poll_record(poll) -> dict:
+    if not isinstance(poll, dict):
+        return {}
+    at = str(poll.get("at") or "")
+    status = str(poll.get("status") or "")
+    detail = str(poll.get("detail") or "")[:300]
+    if not at and not status and not detail:
+        return {}
+    return {"at": at, "status": status, "detail": detail}
+
+
+def _normalize_cursor(cursor) -> dict:
+    raw = cursor if isinstance(cursor, dict) else {}
+    ids = []
+    seen: set[str] = set()
+    for item in raw.get("ids") or []:
+        text = str(item)
+        if text and text not in seen:
+            seen.add(text)
+            ids.append(text)
+        if len(seen) >= _CURSOR_CAP:
+            break
+    ids.sort()
+    return {"at": str(raw.get("at") or ""), "ids": ids}
+
+
+def _normalize_entry(entry: dict) -> dict:
+    hours = {}
+    raw_hours = entry.get("hours") if isinstance(entry.get("hours"), dict) else {}
+    for key, count in raw_hours.items():
+        tally = _as_int(count)
+        if tally > 0:
+            hours[str(key)] = tally
+    if len(hours) > _HOUR_KEEP + 2:
+        hours = {key: hours[key] for key in sorted(hours)[-(_HOUR_KEEP + 2) :]}
+    lines = []
+    for line in entry.get("lines") or []:
+        if isinstance(line, dict):
+            lines.append({"at": str(line.get("at") or ""), "message": str(line.get("message") or "")[:500]})
+    lines.sort(key=lambda line: line["at"])
+    return {
+        "username": str(entry.get("username") or ""),
+        "mac": str(entry.get("mac") or ""),
+        "total": max(0, _as_int(entry.get("total"))),
+        "first": str(entry.get("first") or ""),
+        "last": str(entry.get("last") or ""),
+        "removed": str(entry.get("removed") or ""),
+        "cleared": str(entry.get("cleared") or ""),
+        "hours": hours,
+        "lines": lines[-_LINE_KEEP:],
+    }
+
+
+def _normalize(payload) -> dict:
+    store = _empty()
+    if not isinstance(payload, dict):
+        return store
+    store["cursor"] = _normalize_cursor(payload.get("cursor"))
+    entries = payload.get("entries") if isinstance(payload.get("entries"), dict) else {}
+    for key, entry in entries.items():
+        if isinstance(entry, dict):
+            store["entries"][str(key)] = _normalize_entry(entry)
+    record = _poll_record(payload.get("poll"))
+    if record:
+        store["poll"] = record
+    return store
 
 
 def _load(data_dir: Path, router_id: str) -> dict:
@@ -463,30 +1199,56 @@ def _load(data_dir: Path, router_id: str) -> dict:
 
 
 def _read(path: Path) -> dict:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return _empty()
-    if not isinstance(payload, dict):
-        return _empty()
-    base = _empty()
-    base.update(payload)
-    return base
+    with _LOCK:
+        if not path.is_file():
+            return _empty()
+        try:
+            st = path.stat()
+        except OSError:
+            return _empty()
+        hit = _CACHE.get(str(path))
+        if hit and hit[0] == st.st_mtime_ns and hit[1] == st.st_size:
+            return hit[2]
+        if _needs_migration(path):
+            _migrate_file(path, datetime.now(timezone.utc))
+            hit = _CACHE.get(str(path))
+            if hit:
+                return hit[2]
+            try:
+                st = path.stat()
+            except OSError:
+                return _empty()
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeError):
+            return _empty()
+        store = _normalize(payload)
+        try:
+            st = path.stat()
+        except OSError:
+            return store
+        _CACHE[str(path)] = (st.st_mtime_ns, st.st_size, store)
+        return store
 
 
 def _save(data_dir: Path, router_id: str, store: dict) -> None:
     path = _path(data_dir, router_id)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        json.dump(store, handle, indent=2)
-        handle.write("\n")
+    payload = json.dumps(store, separators=(",", ":")) + "\n"
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".pppoe-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp_name, 0o600)
+        os.replace(tmp_name, path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
     os.chmod(path, 0o600)
-
-
-def _write_poll(data_dir: Path, router: dict, status: str, detail: str, now: datetime) -> None:
-    router_id = str(router.get("id") or "")
-    if not _SAFE_ID.fullmatch(router_id):
-        return
-    store = _load(data_dir, router_id)
-    store["poll"] = {"at": _iso(now), "status": status, "detail": detail[:300]}
-    _save(data_dir, router_id, store)
+    st = path.stat()
+    _CACHE[str(path)] = (st.st_mtime_ns, st.st_size, copy.deepcopy(store))
+    _ROW_CACHE["sig"] = None
